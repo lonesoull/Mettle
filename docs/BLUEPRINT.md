@@ -10,9 +10,11 @@ Personal training tracker for running, walking, hiking and stairs. Android only,
 | Local storage | Room (SQLite), offline-first, background sync via WorkManager |
 | Backend | Supabase free tier: Auth (invite-only), Postgres + PostGIS, Storage, Realtime |
 | Analytics | Computed on-device in Kotlin |
+| Look | Light theme, Strava-style orange `#FC4C02`, Inter + Barlow Semi Condensed — see docs/DESIGN.md |
+| Data model | docs/DATABASE.md, supabase/migrations |
 | Maps | MapLibre Native; OpenFreeMap tiles online; Protomaps PMTiles offline; AWS terrain tiles for elevation/3D |
 | Weather | Open-Meteo (fetched after sync, historical API) |
-| Builds | GitHub Actions |
+| Builds | GitHub Actions (`.github/workflows/build.yml`), signed with the Mettle release key |
 | Distribution | GitHub Releases + in-app updater (no Play Store) |
 | Live beacon page | GitHub Pages + Supabase Realtime |
 | Upkeep | Scheduled GitHub Actions: daily Supabase keep-alive, weekly DB backup |

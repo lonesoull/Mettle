@@ -1,0 +1,91 @@
+package app.mettle.data.db
+
+import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
+import androidx.room.Query
+import androidx.room.Upsert
+import kotlinx.coroutines.flow.Flow
+
+/** Totals for a time window, used by the weekly snapshot and goals. */
+data class PeriodTotals(
+    val distanceM: Long,
+    val movingS: Long,
+    val elevGainM: Double,
+    val floorsUp: Long,
+    val count: Int,
+)
+
+@Dao
+interface ActivityDao {
+    @Query("SELECT * FROM activities WHERE deletedAt IS NULL ORDER BY startedAt DESC LIMIT :limit")
+    fun recent(limit: Int = 30): Flow<List<ActivityEntity>>
+
+    @Query("SELECT * FROM activities WHERE id = :id")
+    fun byId(id: String): Flow<ActivityEntity?>
+
+    @Query(
+        """SELECT COALESCE(SUM(distanceM),0) AS distanceM, COALESCE(SUM(movingS),0) AS movingS,
+           COALESCE(SUM(elevGainM),0) AS elevGainM, COALESCE(SUM(floorsUp),0) AS floorsUp, COUNT(*) AS count
+           FROM activities WHERE deletedAt IS NULL AND startedAt >= :fromMs AND startedAt < :toMs"""
+    )
+    fun totals(fromMs: Long, toMs: Long): Flow<PeriodTotals>
+
+    @Query("SELECT * FROM activities WHERE deletedAt IS NULL AND startedAt >= :fromMs AND startedAt < :toMs ORDER BY startedAt")
+    fun between(fromMs: Long, toMs: Long): Flow<List<ActivityEntity>>
+
+    @Query("SELECT * FROM activities WHERE syncState = 'DIRTY'")
+    suspend fun dirty(): List<ActivityEntity>
+
+    @Upsert suspend fun upsert(activity: ActivityEntity)
+}
+
+@Dao
+interface LapDao {
+    @Query("SELECT * FROM laps WHERE activityId = :activityId ORDER BY kind, idx")
+    fun forActivity(activityId: String): Flow<List<LapEntity>>
+
+    @Upsert suspend fun upsertAll(laps: List<LapEntity>)
+}
+
+@Dao
+interface BestEffortDao {
+    @Query("SELECT * FROM best_efforts WHERE activityId = :activityId")
+    fun forActivity(activityId: String): Flow<List<BestEffortEntity>>
+
+    @Query("SELECT MIN(timeS) FROM best_efforts WHERE effort = :effort")
+    suspend fun best(effort: String): Int?
+
+    @Upsert suspend fun upsertAll(efforts: List<BestEffortEntity>)
+}
+
+@Dao
+interface RecordingDao {
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insert(sample: RecordingSampleEntity)
+
+    @Query("SELECT * FROM recording_samples WHERE sessionId = :sessionId ORDER BY tMs")
+    suspend fun samples(sessionId: String): List<RecordingSampleEntity>
+
+    @Query("SELECT DISTINCT sessionId FROM recording_samples")
+    suspend fun unfinishedSessions(): List<String>
+
+    @Query("DELETE FROM recording_samples WHERE sessionId = :sessionId")
+    suspend fun clear(sessionId: String)
+}
+
+@Dao
+interface GearDao {
+    @Query("SELECT * FROM gear WHERE deletedAt IS NULL AND retiredAt IS NULL ORDER BY name")
+    fun active(): Flow<List<GearEntity>>
+
+    @Upsert suspend fun upsert(gear: GearEntity)
+}
+
+@Dao
+interface GoalDao {
+    @Query("SELECT * FROM goals WHERE active = 1")
+    fun active(): Flow<List<GoalEntity>>
+
+    @Upsert suspend fun upsert(goal: GoalEntity)
+}
