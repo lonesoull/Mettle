@@ -1,5 +1,6 @@
 package app.mettle.ui
 
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -40,6 +41,8 @@ fun MettleApp(db: MettleDatabase, profile: Profile, onSignOut: () -> Unit) {
 
     Scaffold(
         containerColor = MettleColors.Band,
+        // Screens draw their own status-bar spacing (TopBar); only the bottom bar is inset here.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
             if (!onRecord) {
                 NavigationBar(containerColor = MettleColors.Surface, tonalElevation = androidx.compose.ui.unit.Dp(0f)) {
