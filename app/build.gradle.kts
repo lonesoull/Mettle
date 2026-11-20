@@ -17,6 +17,8 @@ android {
         targetSdk = 35
         versionCode = versionCodeFromCi
         versionName = "0.1.$versionCodeFromCi"
+        // Google Maps key comes from the METTLE_MAPS_API_KEY GitHub secret (never committed).
+        manifestPlaceholders["mapsApiKey"] = System.getenv("METTLE_MAPS_API_KEY") ?: ""
     }
 
     signingConfigs {

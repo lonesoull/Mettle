@@ -18,6 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       METTLE_VERSION_CODE: ${{ github.run_number }}
+      METTLE_MAPS_API_KEY: ${{ secrets.METTLE_MAPS_API_KEY }}
     steps:
       - uses: actions/checkout@v4
 

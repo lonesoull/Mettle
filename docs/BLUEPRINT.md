@@ -46,7 +46,8 @@ No extra hardware (no beacons, no add-on sensors) and no paid map services. On f
 - Camera flash → fingertip HR; Bluetooth HR strap/watch and Health Connect → HR and sleep.
 A "What this phone can do" screen shows each phone's tier; the admin sees every member's (profiles.phone_capabilities).
 AI insights: Gemini (key kept on the server) is used until 80% of the monthly token limit the admin enters (alert at 50%; no cap until a limit is entered); after that, and whenever Google refuses a request, insights come from built-in templates on the phone.
-Free map data only: OpenStreetMap (path snapping, building outlines and levels) and AWS terrain tiles.
+Maps — hybrid (decided 2026-11-23): Google Maps SDK for Android (free, unlimited; 3D buildings, indoor floor plans where Google has them, lite-mode thumbnails) when online; OpenStreetMap offline maps when there is no signal. Path snapping, building outlines/levels and heatmap calculations always use OpenStreetMap data (Google's terms forbid storing its map data). The Maps key is restricted to Maps SDK for Android and Mettle's signing certificate.
+Height, weight and other body details are entered by every member (and the admin) while creating their profile.
 
 ## Extras (decided 2026-11-21)
 1. Day replay — scrub through a day on the map: place, height/floor and activity change as it plays.
