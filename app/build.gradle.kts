@@ -85,6 +85,9 @@ dependencies {
     implementation(libs.play.services.location)
     implementation(libs.androidx.work.runtime)
     implementation(libs.multiplatform.settings)
+    implementation(libs.maps.compose)
+    implementation(libs.play.services.maps)
+    implementation(libs.supabase.storage)
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)
 }

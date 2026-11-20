@@ -38,6 +38,12 @@ interface ActivityDao {
     suspend fun dirty(): List<ActivityEntity>
 
     @Upsert suspend fun upsert(activity: ActivityEntity)
+
+    @Query("SELECT * FROM activities WHERE id = :id")
+    suspend fun get(id: String): ActivityEntity?
+
+    @Query("UPDATE activities SET syncState = 'SYNCED' WHERE id = :id AND updatedAt = :updatedAt")
+    suspend fun markSynced(id: String, updatedAt: Long)
 }
 
 @Dao
@@ -46,6 +52,9 @@ interface LapDao {
     fun forActivity(activityId: String): Flow<List<LapEntity>>
 
     @Upsert suspend fun upsertAll(laps: List<LapEntity>)
+
+    @Query("SELECT * FROM laps WHERE activityId = :activityId ORDER BY kind, idx")
+    suspend fun forActivityNow(activityId: String): List<LapEntity>
 }
 
 @Dao
@@ -57,7 +66,15 @@ interface BestEffortDao {
     suspend fun best(effort: String): Int?
 
     @Upsert suspend fun upsertAll(efforts: List<BestEffortEntity>)
+
+    @Query("SELECT * FROM best_efforts WHERE activityId = :activityId")
+    suspend fun forActivityNow(activityId: String): List<BestEffortEntity>
+
+    @Query("SELECT effort, MIN(timeS) AS timeS FROM best_efforts GROUP BY effort")
+    fun bestPerEffort(): Flow<List<EffortBest>>
 }
+
+data class EffortBest(val effort: String, val timeS: Int)
 
 @Dao
 interface RecordingDao {

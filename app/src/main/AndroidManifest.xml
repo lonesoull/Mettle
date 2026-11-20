@@ -48,6 +48,10 @@
             android:exported="false"
             android:foregroundServiceType="health|location" />
         <receiver android:name=".tracking.ActivityReceiver" android:exported="false" />
+        <service
+            android:name=".workout.WorkoutService"
+            android:exported="false"
+            android:foregroundServiceType="location|health" />
         <receiver android:name=".tracking.BootReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

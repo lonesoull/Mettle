@@ -49,10 +49,14 @@ private val modes = listOf(
 )
 
 @Composable
-fun RecordScreen(onClose: () -> Unit) {
+fun RecordScreen(onClose: () -> Unit, onStarted: () -> Unit) {
     var selected by rememberSaveable { mutableStateOf(ActivityType.RUN) }
     var machine by rememberSaveable { mutableStateOf(false) }
     var showNotice by rememberSaveable { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val askLocation = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+        if (granted[android.Manifest.permission.ACCESS_FINE_LOCATION] == true) { app.mettle.workout.WorkoutService.start(context, selected); onStarted() }
+    }
 
     Column(Modifier.fillMaxSize().background(MettleColors.Surface).statusBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -78,7 +82,12 @@ fun RecordScreen(onClose: () -> Unit) {
             Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
                 Box(
                     Modifier.size(88.dp).shadow(12.dp, CircleShape, spotColor = MettleColors.Orange).clip(CircleShape)
-                        .background(MettleColors.Orange).clickable(role = Role.Button) { showNotice = true },
+                        .background(MettleColors.Orange).clickable(role = Role.Button) {
+                            if (selected == ActivityType.STAIRS) { showNotice = true; return@clickable }
+                            val ok = androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                            if (ok) { app.mettle.workout.WorkoutService.start(context, selected); onStarted() }
+                            else askLocation.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
+                        },
                     contentAlignment = Alignment.Center,
                 ) { Text("START", style = MaterialTheme.typography.labelLarge, color = MettleColors.Surface) }
             }
@@ -89,8 +98,8 @@ fun RecordScreen(onClose: () -> Unit) {
         AlertDialog(
             onDismissRequest = { showNotice = false },
             confirmButton = { TextButton(onClick = { showNotice = false }) { Text("OK") } },
-            title = { Text("Recording is coming next") },
-            text = { Text("This first build sets up the app. GPS and stair recording arrive in the next update, which this app will offer to install automatically.") },
+            title = { Text("Stair workouts are coming next") },
+            text = { Text("Run, walk and hike recording work now. Stair workouts (sets, floors up and down) arrive in the next update, which installs itself.") },
         )
     }
 }

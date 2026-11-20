@@ -204,6 +204,18 @@ class TrackingService : Service(), SensorEventListener {
             }
             val state = DayMath.resolve(TrackingState.sensorState, steps)
             if (state != locationState) updateLocationRequests(state)
+            maybeAutoStartRun(day, minute)
+        }
+    }
+
+    /** Running for 2 full minutes with no workout recording → start GPS recording automatically. */
+    private suspend fun maybeAutoStartRun(day: String, minute: Int) {
+        if (app.mettle.workout.WorkoutService.live.value.recording || app.mettle.workout.WorkoutService.unfinished(this) != null) return
+        if (!getSharedPreferences("tracking", MODE_PRIVATE).getBoolean("auto_start_runs", true)) return
+        if (!has(Manifest.permission.ACCESS_FINE_LOCATION)) return
+        val a = db.day().minute(day, minute - 1); val b = db.day().minute(day, minute - 2)
+        if (a?.state == DayState.RUNNING && b?.state == DayState.RUNNING) {
+            runCatching { app.mettle.workout.WorkoutService.start(this, app.mettle.data.db.ActivityType.RUN) }
         }
     }
 

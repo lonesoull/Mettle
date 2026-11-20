@@ -198,6 +198,7 @@ data class RecordingSampleEntity(
     val speedMs: Float?,
     val steps: Int?,                     // cumulative step count
     val paused: Boolean,
+    val pressureHpa: Float? = null,
 )
 
 /** All-day tracking: what happened in each minute of the day (local only, summarised for the server). */

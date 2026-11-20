@@ -61,7 +61,7 @@ private const val DEFAULT_KM_GOAL = 25_000L
 private const val DEFAULT_FLOORS_GOAL = 200L
 
 @Composable
-fun HomeScreen(db: MettleDatabase, onRecord: () -> Unit, onProgress: () -> Unit, onSetup: () -> Unit) {
+fun HomeScreen(db: MettleDatabase, onRecord: () -> Unit, onProgress: () -> Unit, onSetup: () -> Unit, onOpen: (String) -> Unit, onResumeSave: () -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     var trackingOn by remember { androidx.compose.runtime.mutableStateOf(false) }
     androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
@@ -80,12 +80,15 @@ fun HomeScreen(db: MettleDatabase, onRecord: () -> Unit, onProgress: () -> Unit,
         TopBar("METTLE", wordmark = true)
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
             item { Spacer(Modifier.height(0.dp)) }
+            val live = app.mettle.workout.WorkoutService.live.value
+            if (live.recording) item { Banner("Workout in progress — tap to return", onRecord) }
+            else if (app.mettle.workout.WorkoutService.unfinished(ctx) != null) item { Banner("You have an unsaved workout — tap to save it", onResumeSave) }
             item { TodayCard(db, trackingOn, onSetup) }
             item { WeekCard(totals, week, weekStart, zone, onProgress) }
             if (recent.isEmpty()) {
                 item { EmptyFeed(onRecord) }
             } else {
-                items(recent, key = { it.id }) { ActivityCard(it, zone) }
+                items(recent, key = { it.id }) { ActivityCard(it, zone, onOpen) }
             }
             item { Spacer(Modifier.height(8.dp)) }
         }
@@ -187,11 +190,11 @@ private fun EmptyFeed(onRecord: () -> Unit) {
 }
 
 @Composable
-private fun ActivityCard(a: ActivityEntity, zone: ZoneId) {
+private fun ActivityCard(a: ActivityEntity, zone: ZoneId, onOpen: (String) -> Unit) {
     val whenText = remember(a.startedAt) {
         Instant.ofEpochMilli(a.startedAt).atZone(zone).format(DateTimeFormatter.ofPattern("EEE d MMM 'at' h:mm a"))
     }
-    Section {
+    Section(Modifier.clickable { onOpen(a.id) }) {
         Text(whenText, style = MettleType.Label, color = MettleColors.Sub)
         Text(a.title, style = androidx.compose.material3.MaterialTheme.typography.headlineMedium)
         Row(Modifier.fillMaxWidth()) {
@@ -204,5 +207,12 @@ private fun ActivityCard(a: ActivityEntity, zone: ZoneId) {
             }
             Stat("Time", Fmt.duration(a.movingS.toLong()), Modifier.weight(1f))
         }
+    }
+}
+
+@Composable
+private fun Banner(text: String, onClick: () -> Unit) {
+    Box(Modifier.fillMaxWidth().background(MettleColors.Orange).clickable(onClick = onClick).padding(16.dp)) {
+        Text(text, style = androidx.compose.material3.MaterialTheme.typography.titleSmall, color = MettleColors.Surface)
     }
 }

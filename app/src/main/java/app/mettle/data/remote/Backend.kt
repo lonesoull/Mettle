@@ -74,6 +74,7 @@ object Backend {
                 alwaysAutoRefresh = true
             }
             install(Postgrest)
+            install(io.github.jan.supabase.storage.Storage)
         }
     }
 

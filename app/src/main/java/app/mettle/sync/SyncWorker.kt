@@ -24,6 +24,7 @@ import app.mettle.tracking.TrackingService
 import app.mettle.tracking.TrackingState
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.storage.storage
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
@@ -72,6 +73,56 @@ private data class StatusRow(
     val problem: String?,
     @SerialName("position_source") val positionSource: String?,
 )
+
+@Serializable
+private data class ActivityRow(
+    val id: String,
+    @SerialName("user_id") val userId: String,
+    val type: String,
+    @SerialName("sub_type") val subType: String,
+    val title: String,
+    val description: String?,
+    @SerialName("started_at") val startedAt: String,
+    val timezone: String,
+    @SerialName("elapsed_s") val elapsedS: Int,
+    @SerialName("moving_s") val movingS: Int,
+    @SerialName("distance_m") val distanceM: Int,
+    @SerialName("elev_gain_m") val elevGainM: Double,
+    @SerialName("elev_loss_m") val elevLossM: Double,
+    @SerialName("floors_up") val floorsUp: Int,
+    @SerialName("floors_down") val floorsDown: Int,
+    @SerialName("avg_pace_s_km") val avgPaceSKm: Double?,
+    @SerialName("gap_s_km") val gapSKm: Double?,
+    @SerialName("avg_cadence_spm") val avgCadence: Int?,
+    val calories: Int?,
+    val rpe: Int?,
+    @SerialName("training_load") val trainingLoad: Int?,
+    val visibility: String,
+    val route: String?,
+    @SerialName("route_public") val routePublic: String?,
+    @SerialName("streams_path") val streamsPath: String?,
+    val device: String?,
+    @SerialName("deleted_at") val deletedAt: String?,
+)
+
+@Serializable
+private data class LapRow(
+    val id: String, @SerialName("activity_id") val activityId: String, @SerialName("user_id") val userId: String,
+    val idx: Int, val kind: String, @SerialName("start_offset_s") val startOffsetS: Int, @SerialName("end_offset_s") val endOffsetS: Int,
+    @SerialName("distance_m") val distanceM: Int, @SerialName("moving_s") val movingS: Int, @SerialName("elev_gain_m") val elevGainM: Double,
+    @SerialName("floors_up") val floorsUp: Int, @SerialName("floors_down") val floorsDown: Int,
+    @SerialName("climb_s") val climbS: Int?, @SerialName("descent_s") val descentS: Int?, @SerialName("rest_s") val restS: Int?,
+)
+
+@Serializable
+private data class EffortRow(
+    val id: String, @SerialName("user_id") val userId: String, @SerialName("activity_id") val activityId: String,
+    val effort: String, @SerialName("time_s") val timeS: Int, @SerialName("start_offset_s") val startOffsetS: Int,
+    @SerialName("end_offset_s") val endOffsetS: Int, @SerialName("rank_at_time") val rankAtTime: Int?, @SerialName("achieved_at") val achievedAt: String,
+)
+
+private fun lineString(points: List<Pair<Double, Double>>): String? =
+    if (points.size < 2) null else "SRID=4326;LINESTRING(" + points.joinToString(",") { "${it.second} ${it.first}" } + ")"
 
 @Serializable
 private data class CapabilitiesRow(@SerialName("phone_capabilities") val capabilities: JsonObject)
@@ -127,6 +178,45 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                 if (rows.isNotEmpty()) Backend.client.from("day_segments").insert(rows)
             }
             prefs.edit().putLong("days_synced_at", startedAt).apply()
+
+            // Finished workouts.
+            for (a in db.activities().dirty()) {
+                val streams = app.mettle.workout.WorkoutSaver.readStreams(applicationContext, a.id)
+                var streamsPath: String? = null
+                val file = app.mettle.workout.WorkoutSaver.streamsFile(applicationContext, a.id)
+                if (file.exists()) {
+                    streamsPath = "$userId/${a.id}.json.gz"
+                    Backend.client.storage.from("streams").upload(streamsPath, file.readBytes()) { upsert = true }
+                }
+                val route = a.routePolyline?.let { app.mettle.workout.Polyline.decode(it) }.orEmpty()
+                // Hide the first and last 200 m from the group (usually home).
+                val public = streams?.let { st ->
+                    val total = st.dist.lastOrNull() ?: 0.0
+                    st.dist.indices.filter { st.dist[it] > 200 && st.dist[it] < total - 200 }.let { idx ->
+                        val keep = app.mettle.workout.WorkoutMath.simplify(idx.map { st.lat[it] }, idx.map { st.lon[it] })
+                        keep.map { st.lat[idx[it]] to st.lon[idx[it]] }
+                    }
+                }.orEmpty()
+                Backend.client.from("activities").upsert(
+                    ActivityRow(
+                        a.id, userId, a.type.name.lowercase(), a.subType.name.lowercase(), a.title, a.description,
+                        Instant.ofEpochMilli(a.startedAt).toString(), a.timezone, a.elapsedS, a.movingS, a.distanceM,
+                        a.elevGainM, a.elevLossM, a.floorsUp, a.floorsDown, a.avgPaceSKm, a.gapSKm, a.avgCadenceSpm, a.calories,
+                        a.rpe, a.trainingLoad, a.visibility.name.lowercase(), lineString(route), lineString(public), streamsPath, a.device,
+                        a.deletedAt?.let { Instant.ofEpochMilli(it).toString() },
+                    ),
+                ) { onConflict = "id" }
+                val laps = db.laps().forActivityNow(a.id)
+                if (laps.isNotEmpty()) Backend.client.from("laps").upsert(laps.map { l ->
+                    LapRow(l.id, a.id, userId, l.idx, l.kind.name.lowercase(), l.startOffsetS, l.endOffsetS, l.distanceM, l.movingS,
+                        l.elevGainM, l.floorsUp, l.floorsDown, l.climbS, l.descentS, l.restS)
+                }) { onConflict = "id" }
+                val efforts = db.bestEfforts().forActivityNow(a.id)
+                if (efforts.isNotEmpty()) Backend.client.from("best_efforts").upsert(efforts.map { e ->
+                    EffortRow(e.id, userId, a.id, e.effort, e.timeS, e.startOffsetS, e.endOffsetS, e.rankAtTime, Instant.ofEpochMilli(e.achievedAt).toString())
+                }) { onConflict = "id" }
+                db.activities().markSynced(a.id, a.updatedAt)
+            }
 
             // Live status for the admin map.
             val last = db.track().latest()
