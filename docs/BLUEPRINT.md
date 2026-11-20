@@ -34,6 +34,19 @@ Personal training tracker for running, walking, hiking and stairs. Android only,
 - Heart rate (BLE strap/watch) and sleep (Health Connect) only appear when a device is connected.
 - Group admin reads all members' data; members see only their own. No in-app consent screen (closed group).
 
+## Core rule: best effort with what each phone has (decided 2026-11-22)
+No extra hardware (no beacons, no add-on sensors) and no paid map services. On first launch and after system updates the app detects each phone's capabilities and always uses the best available method, silently skipping what is missing:
+- Barometer → accurate floors, lifts and elevation; otherwise stair-pattern estimates.
+- Wi-Fi RTT → 1–2 m indoor ranging wherever nearby routers support it; otherwise skipped.
+- Wi-Fi fingerprints of frequently visited places (existing networks, scan-throttled by Android).
+- Dual-frequency GNSS → 1–3 m outdoors; otherwise standard GNSS.
+- Android fused location (incl. Google's 3D-building GNSS correction where available) always.
+- Hardware step counter / sensor batching → lowest battery; otherwise software fallbacks.
+- Gyroscope + magnetometer → better heading, placement and dead reckoning.
+- Camera flash → fingertip HR; Bluetooth HR strap/watch and Health Connect → HR and sleep.
+A "What this phone can do" screen shows each phone's tier; the admin sees every member's (profiles.phone_capabilities).
+Free map data only: OpenStreetMap (path snapping, building outlines and levels) and AWS terrain tiles.
+
 ## Extras (decided 2026-11-21)
 1. Day replay — scrub through a day on the map: place, height/floor and activity change as it plays.
 2. Sitting vs standing — from thigh angle with the phone in a trouser pocket; standing hours, long-sitting nudges.

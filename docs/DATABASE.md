@@ -63,7 +63,7 @@ Phone-only table: `recording_samples` — a crash-safe buffer written every seco
 
 ## Setting up the server (done once, when we reach release 3)
 1. Create a free Supabase project.
-2. In its SQL editor run, in order: `20261119000000_init.sql`, `20261120000000_all_day_and_admin.sql`, `20261121000000_space_time_and_devices.sql`, `20261122000000_safety_health_extras.sql`.
+2. In its SQL editor run, in order: `20261119000000_init.sql`, `20261120000000_all_day_and_admin.sql`, `20261121000000_space_time_and_devices.sql`, `20261122000000_safety_health_extras.sql`, `20261123000000_phone_capabilities.sql`.
 3. After your first login, make yourself admin with the one-line `update profiles …` at the bottom of the second script.
 4. Authentication → turn **off** "Allow new users to sign up"; invite each member by email.
 
