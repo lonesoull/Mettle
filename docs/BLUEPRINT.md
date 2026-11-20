@@ -45,6 +45,7 @@ No extra hardware (no beacons, no add-on sensors) and no paid map services. On f
 - Gyroscope + magnetometer → better heading, placement and dead reckoning.
 - Camera flash → fingertip HR; Bluetooth HR strap/watch and Health Connect → HR and sleep.
 A "What this phone can do" screen shows each phone's tier; the admin sees every member's (profiles.phone_capabilities).
+No token-based or paid AI: Mettle Insights are generated on the phone from built-in rules and templates.
 Free map data only: OpenStreetMap (path snapping, building outlines and levels) and AWS terrain tiles.
 
 ## Extras (decided 2026-11-21)

@@ -46,7 +46,6 @@ Two copies of the same data model:
 | `geofence_rules` | arrive/leave rule | who is notified, whose movement, which place |
 | `alerts` | fall / SOS / no-movement / arrive / leave event | location, floor, status, who acknowledged |
 | `hr_spot_checks` | fingertip heart-rate check | bpm, quality, context |
-| `app_config` / `api_usage` | Gemini settings / monthly token usage | warn the admin at 400,000 tokens, switch AI insights to built-in templates at 680,000 (limit 700,000) |
 | `sensor_lab_recordings` | labelled raw sensor recording | used to tune stair detection on phones without a barometer |
 
 Phone-only table: `recording_samples` — a crash-safe buffer written every second during a workout, compacted into the streams file when you press Save.
@@ -64,7 +63,7 @@ Phone-only table: `recording_samples` — a crash-safe buffer written every seco
 
 ## Setting up the server (done once, when we reach release 3)
 1. Create a free Supabase project.
-2. In its SQL editor run, in order: `20261119000000_init.sql`, `20261120000000_all_day_and_admin.sql`, `20261121000000_space_time_and_devices.sql`, `20261122000000_safety_health_extras.sql`, `20261123000000_phone_capabilities.sql`, `20261124000000_api_usage_limits.sql`.
+2. In its SQL editor run, in order: `20261119000000_init.sql`, `20261120000000_all_day_and_admin.sql`, `20261121000000_space_time_and_devices.sql`, `20261122000000_safety_health_extras.sql`, `20261123000000_phone_capabilities.sql`.
 3. After your first login, make yourself admin with the one-line `update profiles …` at the bottom of the second script.
 4. Authentication → turn **off** "Allow new users to sign up"; invite each member by email.
 
