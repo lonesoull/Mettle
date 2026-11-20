@@ -46,7 +46,7 @@ Two copies of the same data model:
 | `geofence_rules` | arrive/leave rule | who is notified, whose movement, which place |
 | `alerts` | fall / SOS / no-movement / arrive / leave event | location, floor, status, who acknowledged |
 | `hr_spot_checks` | fingertip heart-rate check | bpm, quality, context |
-| `app_config` / `api_usage` | Gemini settings / monthly token usage | admin-editable limit (default 700,000); alert at 400,000; templates from 80% of the limit until next month |
+| `app_config` / `api_usage` | Gemini settings / monthly token usage | limit entered by the admin (empty until then — usage is only counted); alert at 50%, templates from 80% of the limit until next month |
 | `sensor_lab_recordings` | labelled raw sensor recording | used to tune stair detection on phones without a barometer |
 
 Phone-only table: `recording_samples` — a crash-safe buffer written every second during a workout, compacted into the streams file when you press Save.

@@ -3,19 +3,22 @@
 --
 -- Maps never use Google: they are OpenStreetMap only, so they need no metering.
 -- * The Gemini edge function reports tokens via record_api_usage('gemini', n).
--- * Limit defaults to 700,000 tokens/month and is editable by the admin.
--- * At warn_at (400,000) the admin gets an alert; at 80% of the limit
---   (560,000 by default) insights switch to built-in text templates for the
---   rest of the month. A new month switches Gemini back on automatically.
+-- * The monthly token limit is empty until the admin enters it. Until then
+--   usage is only counted (shown on the admin screen) and Google refusals
+--   fall back to templates in the app.
+-- * Once a limit is set: alert at warn_ratio (50%) of it; at stop_ratio (80%)
+--   insights switch to built-in text templates for the rest of the month.
+--   A new month switches Gemini back on automatically.
 
 alter type alert_kind add value if not exists 'api_usage';
 
 create table app_config (
   provider      text primary key check (provider in ('gemini')),
   enabled       boolean not null default true,     -- false = use the free fallback
-  hard_limit    bigint  not null default 700000 check (hard_limit > 0),
-  warn_at       bigint  not null default 400000,
+  hard_limit    bigint  check (hard_limit > 0),          -- null = not set yet
+  warn_ratio    numeric(3,2) not null default 0.50 check (warn_ratio > 0 and warn_ratio <= 1),
   stop_ratio    numeric(3,2) not null default 0.80 check (stop_ratio > 0 and stop_ratio <= 1),
+  warn_at       bigint  generated always as (floor(hard_limit * warn_ratio)::bigint) stored,
   switch_at     bigint  generated always as (floor(hard_limit * stop_ratio)::bigint) stored,
   switched_month date,                             -- month Gemini was switched off
   warned_month  date,                              -- month the 400k alert was sent
@@ -61,13 +64,13 @@ begin
   total := api_usage_this_month(p_provider);
   select id into admin from profiles where role = 'admin' limit 1;
 
-  if total >= cfg.warn_at and (cfg.warned_month is null or cfg.warned_month < m) then
+  if cfg.warn_at is not null and total >= cfg.warn_at and (cfg.warned_month is null or cfg.warned_month < m) then
     update app_config set warned_month = m, updated_at = now() where provider = p_provider;
     if admin is not null then
       insert into alerts (id, user_id, kind, detail)
       values (gen_random_uuid(), admin, 'api_usage',
               jsonb_build_object('provider', p_provider, 'used', total, 'level', 'warning',
-                                 'message', p_provider || ' passed ' || cfg.warn_at || ' this month'));
+                                 'message', p_provider || ' used ' || total || ' tokens this month (' || round(cfg.warn_ratio * 100) || '% of your limit)'));
     end if;
   end if;
 
@@ -77,13 +80,13 @@ begin
     cfg.enabled := true;
   end if;
 
-  if cfg.enabled and total >= cfg.switch_at then
+  if cfg.enabled and cfg.switch_at is not null and total >= cfg.switch_at then
     update app_config set enabled = false, switched_at = now(), switched_month = m, updated_at = now() where provider = p_provider;
     if admin is not null then
       insert into alerts (id, user_id, kind, detail)
       values (gen_random_uuid(), admin, 'api_usage',
               jsonb_build_object('provider', p_provider, 'used', total, 'level', 'switched',
-                                 'message', p_provider || ' reached 80% of its limit (' || total || ' tokens); using templates until next month'));
+                                 'message', p_provider || ' reached ' || round(cfg.stop_ratio * 100) || '% of your limit (' || total || ' tokens); using templates until next month'));
     end if;
     return false;
   end if;

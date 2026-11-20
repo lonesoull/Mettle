@@ -45,7 +45,7 @@ No extra hardware (no beacons, no add-on sensors) and no paid map services. On f
 - Gyroscope + magnetometer → better heading, placement and dead reckoning.
 - Camera flash → fingertip HR; Bluetooth HR strap/watch and Health Connect → HR and sleep.
 A "What this phone can do" screen shows each phone's tier; the admin sees every member's (profiles.phone_capabilities).
-AI insights: Gemini (key kept on the server) is used until 80% of the admin-set monthly token limit (default 700,000; alert at 400,000); after that, and whenever Google refuses a request, insights come from built-in templates on the phone.
+AI insights: Gemini (key kept on the server) is used until 80% of the monthly token limit the admin enters (alert at 50%; no cap until a limit is entered); after that, and whenever Google refuses a request, insights come from built-in templates on the phone.
 Free map data only: OpenStreetMap (path snapping, building outlines and levels) and AWS terrain tiles.
 
 ## Extras (decided 2026-11-21)
