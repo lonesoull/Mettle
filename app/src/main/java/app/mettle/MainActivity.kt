@@ -6,7 +6,7 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import android.graphics.Color
-import app.mettle.ui.MettleApp
+import app.mettle.ui.Root
 import app.mettle.ui.theme.MettleTheme
 
 class MainActivity : ComponentActivity() {
@@ -17,6 +17,6 @@ class MainActivity : ComponentActivity() {
         )
         super.onCreate(savedInstanceState)
         val db = (application as MettleApplication).database
-        setContent { MettleTheme { MettleApp(db) } }
+        setContent { MettleTheme { Root(db) } }
     }
 }

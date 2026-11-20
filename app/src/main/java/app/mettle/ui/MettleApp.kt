@@ -18,6 +18,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import app.mettle.data.db.MettleDatabase
+import app.mettle.data.remote.Profile
 import app.mettle.ui.home.HomeScreen
 import app.mettle.ui.progress.ProgressScreen
 import app.mettle.ui.record.RecordScreen
@@ -31,7 +32,7 @@ private enum class Tab(val route: String, val label: String, val icon: ImageVect
 }
 
 @Composable
-fun MettleApp(db: MettleDatabase) {
+fun MettleApp(db: MettleDatabase, profile: Profile, onSignOut: () -> Unit) {
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
     val current = backStack?.destination
@@ -71,7 +72,7 @@ fun MettleApp(db: MettleDatabase) {
         NavHost(nav, startDestination = Tab.Home.route, modifier = Modifier.padding(padding)) {
             composable(Tab.Home.route) { HomeScreen(db, onRecord = { nav.navigate(Tab.Record.route) }, onProgress = { nav.navigate(Tab.Progress.route) }) }
             composable(Tab.Record.route) { RecordScreen(onClose = { nav.popBackStack() }) }
-            composable(Tab.Progress.route) { ProgressScreen(db) }
+            composable(Tab.Progress.route) { ProgressScreen(db, profile) }
         }
     }
 }

@@ -13,12 +13,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import app.mettle.data.db.MettleDatabase
+import app.mettle.data.remote.Backend
+import app.mettle.data.remote.Profile
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material3.TextButton
+import kotlinx.coroutines.launch
 import app.mettle.ui.components.Section
 import app.mettle.ui.components.TopBar
 import app.mettle.ui.theme.MettleColors
 
 @Composable
-fun ProgressScreen(db: MettleDatabase) {
+fun ProgressScreen(db: MettleDatabase, profile: Profile) {
+    val scope = rememberCoroutineScope()
     val recent by db.activities().recent(1).collectAsState(emptyList())
     Column(Modifier.fillMaxSize().background(MettleColors.Band), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         TopBar("Progress")
@@ -29,6 +35,12 @@ fun ProgressScreen(db: MettleDatabase) {
                 else "Keep going. Charts appear once there is a week of training to analyse.",
                 style = MaterialTheme.typography.bodyLarge, color = MettleColors.Ink2,
             )
+        }
+        Section {
+            Text(if (profile.isAdmin) "${profile.displayName} · Admin" else profile.displayName, style = MaterialTheme.typography.titleLarge)
+            Text("Height ${profile.heightCm} cm" + (profile.weightKg?.let { " · Weight $it kg" } ?: "") + " · Step goal ${profile.stepGoal}",
+                style = MaterialTheme.typography.bodyLarge, color = MettleColors.Ink2)
+            TextButton(onClick = { scope.launch { runCatching { Backend.signOut() } } }) { Text("Sign out", color = MettleColors.Orange) }
         }
         Section {
             Text("Personal records", style = MaterialTheme.typography.titleLarge)

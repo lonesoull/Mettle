@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 val versionCodeFromCi = (System.getenv("METTLE_VERSION_CODE") ?: "1").toInt()
@@ -19,6 +20,9 @@ android {
         versionName = "0.1.$versionCodeFromCi"
         // Google Maps key comes from the METTLE_MAPS_API_KEY GitHub secret (never committed).
         manifestPlaceholders["mapsApiKey"] = System.getenv("METTLE_MAPS_API_KEY") ?: ""
+        // Public project values (designed to ship inside the app; row-level security protects data).
+        buildConfigField("String", "SUPABASE_URL", "\"${project.property("mettle.supabaseUrl")}\"")
+        buildConfigField("String", "SUPABASE_KEY", "\"${project.property("mettle.supabasePublishableKey")}\"")
     }
 
     signingConfigs {
@@ -49,7 +53,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
 }
 
 ksp {
@@ -70,6 +77,11 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(platform(libs.supabase.bom))
+    implementation(libs.supabase.auth)
+    implementation(libs.supabase.postgrest)
+    implementation(libs.ktor.client.okhttp)
+    implementation(libs.kotlinx.serialization.json)
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)
 }
