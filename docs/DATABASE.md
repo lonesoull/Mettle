@@ -9,7 +9,7 @@ Two copies of the same data model:
 
 ## Who can see what
 - **Each member** sees only their own data, plus workouts others shared to the group feed.
-- **The admin** (you) can read every member's data but cannot change it. Members agree to this on a consent screen at first login (`profiles.admin_visibility_accepted_at`).
+- **The admin** (you) can read every member's data — workouts, daily activity, location tracks, heart rate, sleep — but cannot change it. Closed group: no in-app consent screen (Android's own permission prompts and tracking notification still appear).
 - Only the admin can change roles; the first admin is set once from the Supabase SQL editor.
 
 ## Rules that keep sync simple
@@ -36,6 +36,10 @@ Two copies of the same data model:
 | `kudos`, `comments` | social interaction | within the group only |
 | `daily_summaries` | member per day | steps, estimated distance, active/walking/running/still/vehicle minutes, floors up/down (estimate), active calories |
 | `day_segments` | stretch of one state in the day timeline | still / walking / running / stairs up / stairs down / vehicle / cycling, steps, floors, confidence, phone placement (pocket/hand/bag/armband/table) |
+| `day_tracks` | member per day | pointer to the compressed all-day 3D track file (lat, lon, height, accuracy, floor, source, activity state over time) |
+| `stays` | place someone stayed | where, from–to, height/floor, label (Home, Office…) — the readable location timeline |
+| `devices` | paired heart-rate strap / Health Connect source | what it provides (heart rate, sleep); HR and sleep screens stay hidden until one exists |
+| `sleep_sessions` | night of sleep from a connected device | asleep/deep/light/REM/awake minutes, resting HR |
 | `sensor_lab_recordings` | labelled raw sensor recording | used to tune stair detection on phones without a barometer |
 
 Phone-only table: `recording_samples` — a crash-safe buffer written every second during a workout, compacted into the streams file when you press Save.
@@ -53,7 +57,7 @@ Phone-only table: `recording_samples` — a crash-safe buffer written every seco
 
 ## Setting up the server (done once, when we reach release 3)
 1. Create a free Supabase project.
-2. Run `supabase/migrations/20261119000000_init.sql`, then `20261120000000_all_day_and_admin.sql`, in its SQL editor.
+2. In its SQL editor run, in order: `20261119000000_init.sql`, `20261120000000_all_day_and_admin.sql`, `20261121000000_space_time_and_devices.sql`.
 3. After your first login, make yourself admin with the one-line `update profiles …` at the bottom of the second script.
 4. Authentication → turn **off** "Allow new users to sign up"; invite each member by email.
 

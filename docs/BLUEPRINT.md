@@ -27,6 +27,13 @@ Personal training tracker for running, walking, hiking and stairs. Android only,
 - Hidden "Sensor Lab" mode records labelled raw sensor data for tuning.
 - Optional future: BLE pressure sensor.
 
+## All-day tracking (decided 2026-11-20)
+- Activity state all day: still / walking / running / stairs up / stairs down / vehicle, with phone placement, via batched motion sensors gated by the hardware step counter.
+- Space-time track: best-estimate 3D position (lat, lon, height + accuracy) over time, fusing GPS, network location, dead reckoning and barometer; adaptive sampling (~5–10% battery/day). Indoors: building + floor, not room.
+- Barometer phones: floors and lifts detected accurately; others estimate from stair detection.
+- Heart rate (BLE strap/watch) and sleep (Health Connect) only appear when a device is connected.
+- Group admin reads all members' data; members see only their own. No in-app consent screen (closed group).
+
 ## Release plan
 **v1**
 1. Run/walk/hike recording: foreground service, GPS filtering, auto-pause, map
