@@ -16,7 +16,7 @@ Two copies of the same data model:
 - **IDs are made on the phone** (UUIDs), so an offline workout keeps the same id after it uploads.
 - **`updated_at` + last write wins** decides conflicts; **`deleted_at`** is a soft delete so deletions sync too.
 - **Per-second data is a file, not rows.** GPS points, altitude, steps and stair events are packed into one gzip JSON file per activity (Supabase Storage bucket `streams`, path `{user_id}/{activity_id}.json.gz`). Tables hold only summaries — this keeps us inside the free tier for years.
-- **Privacy is enforced by the server**, not the app: row-level security means a member can only read their own rows; others see your workouts only through the `feed_activities` view, which shows the privacy-trimmed route (`route_public`) and never your raw data.
+- **Privacy is enforced by the server**, not the app: row-level security means a member can only read their own rows; others see your workouts only through the `get_feed()` function, which shows the privacy-trimmed route (`route_public`) and never your raw data.
 
 ## Tables
 
@@ -64,7 +64,7 @@ Phone-only table: `recording_samples` — a crash-safe buffer written every seco
 
 ## Setting up the server (done once, when we reach release 3)
 1. Create a free Supabase project.
-2. In its SQL editor run, in order: `20261119000000_init.sql`, `20261120000000_all_day_and_admin.sql`, `20261121000000_space_time_and_devices.sql`, `20261122000000_safety_health_extras.sql`, `20261123000000_phone_capabilities.sql`, `20261124000000_api_usage_limits.sql`, `20261125000000_grants.sql`.
+2. In its SQL editor run, in order: `20261119000000_init.sql`, `20261120000000_all_day_and_admin.sql`, `20261121000000_space_time_and_devices.sql`, `20261122000000_safety_health_extras.sql`, `20261123000000_phone_capabilities.sql`, `20261124000000_api_usage_limits.sql`, `20261125000000_grants.sql`, `20261126000000_advisor_fixes.sql`.
 3. After your first login, make yourself admin with the one-line `update profiles …` at the bottom of the second script.
 4. Authentication → turn **off** "Allow new users to sign up"; invite each member by email.
 
