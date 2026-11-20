@@ -189,8 +189,20 @@ private fun DayState.toServer() = when (this) {
     DayState.VEHICLE -> "vehicle"; DayState.CYCLING -> "cycling"; DayState.UNKNOWN -> "unknown"
 }
 
-/** Height/weight kept on the phone so tracking works offline. */
+/** Profile kept on the phone so the app opens (and tracks) without waiting for the server. */
 object ProfileCache {
+    private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+    fun saveProfile(context: Context, profile: app.mettle.data.remote.Profile) {
+        context.getSharedPreferences("profile", Context.MODE_PRIVATE).edit()
+            .putString("json", json.encodeToString(app.mettle.data.remote.Profile.serializer(), profile)).apply()
+        save(context, profile.heightCm, profile.weightKg, profile.stepGoal)
+    }
+    fun profile(context: Context, userId: String): app.mettle.data.remote.Profile? =
+        context.getSharedPreferences("profile", Context.MODE_PRIVATE).getString("json", null)
+            ?.let { runCatching { json.decodeFromString(app.mettle.data.remote.Profile.serializer(), it) }.getOrNull() }
+            ?.takeIf { it.id == userId }
+    fun clear(context: Context) = context.getSharedPreferences("profile", Context.MODE_PRIVATE).edit().remove("json").apply()
+
     fun save(context: Context, heightCm: Int?, weightKg: Double?, stepGoal: Int) {
         context.getSharedPreferences("profile", Context.MODE_PRIVATE).edit()
             .putInt("height", heightCm ?: 170).putFloat("weight", (weightKg ?: 70.0).toFloat()).putInt("goal", stepGoal).apply()

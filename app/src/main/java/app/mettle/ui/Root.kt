@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -35,15 +37,32 @@ fun Root(db: MettleDatabase) {
     val auth by Backend.authState.collectAsState(AuthState.Loading)
     var profile by remember { mutableStateOf<Profile?>(null) }
     var profileLoaded by remember { mutableStateOf(false) }
+    var serverUnreachable by remember { mutableStateOf(false) }
 
     val signedIn = auth as? AuthState.SignedIn
     LaunchedEffect(signedIn?.userId) {
         profile = null
         profileLoaded = false
         if (signedIn != null) {
-            profile = runCatching { Backend.loadProfile(signedIn.userId) }.getOrNull()
+            // Show the saved copy immediately; refresh from the server in the background.
+            val cached = ProfileCache.profile(context, signedIn.userId)
+            if (cached != null) { profile = cached; profileLoaded = true }
+            var remote: Profile? = null
+            var reached = false
+            repeat(3) { attempt ->
+                if (!reached) {
+                    runCatching { Backend.loadProfile(signedIn.userId) }
+                        .onSuccess { remote = it; reached = true }
+                        .onFailure { kotlinx.coroutines.delay(2000L * (attempt + 1)) }
+                }
+            }
+            if (reached) {
+                profile = remote
+                remote?.let { ProfileCache.saveProfile(context, it) }
+            }
+            // Only if the server answered and there truly is no completed profile do we ask for one.
             profileLoaded = true
-            profile?.let { ProfileCache.save(context, it.heightCm, it.weightKg, it.stepGoal) }
+            serverUnreachable = !reached && cached == null
             SyncWorker.schedule(context)
             if (TrackingService.isEnabled(context) && setupStatus(context).essentials) runCatching { TrackingService.start(context) }
         }
@@ -51,7 +70,9 @@ fun Root(db: MettleDatabase) {
 
     Column(Modifier.fillMaxSize()) {
         UpdateBanner()
-        Box(Modifier.weight(1f)) { RootContent(db, auth, signedIn, profile, profileLoaded) { profile = it } }
+        Box(Modifier.weight(1f)) {
+            if (serverUnreachable && profile == null) Offline() else RootContent(db, auth, signedIn, profile, profileLoaded) { profile = it }
+        }
     }
 }
 
@@ -65,7 +86,7 @@ private fun RootContent(
         auth is AuthState.SignedOut -> SignInScreen()
         signedIn == null || !profileLoaded -> Loading()
         profile?.isComplete != true -> ProfileSetupScreen(signedIn.userId, profile) { p ->
-            ProfileCache.save(context, p.heightCm, p.weightKg, p.stepGoal); onProfile(p)
+            ProfileCache.saveProfile(context, p); onProfile(p)
         }
         else -> MettleApp(db, profile, onSignOut = { })
     }
@@ -75,5 +96,16 @@ private fun RootContent(
 private fun Loading() {
     Box(Modifier.fillMaxSize().background(MettleColors.Surface), contentAlignment = Alignment.Center) {
         CircularProgressIndicator(color = MettleColors.Orange)
+    }
+}
+
+@Composable
+private fun Offline() {
+    Box(Modifier.fillMaxSize().background(MettleColors.Surface), contentAlignment = Alignment.Center) {
+        androidx.compose.material3.Text(
+            "Can't reach the Mettle server. Check your internet connection and reopen the app.",
+            style = androidx.compose.material3.MaterialTheme.typography.bodyLarge, color = MettleColors.Ink2,
+            modifier = androidx.compose.ui.Modifier.padding(32.dp),
+        )
     }
 }

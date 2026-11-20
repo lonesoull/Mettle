@@ -26,6 +26,15 @@ object Updater {
     @Serializable private data class Asset(val name: String, @SerialName("browser_download_url") val url: String, val size: Long)
     @Serializable private data class Release(@SerialName("tag_name") val tag: String, val assets: List<Asset> = emptyList())
 
+    /** Guards against two installs at once (app start + background worker). */
+    @Volatile var installing = false
+
+    suspend fun installOnce(context: Context, update: Available, onProgress: (Float) -> Unit) {
+        if (installing) return
+        installing = true
+        try { install(context, update, onProgress) } catch (e: Throwable) { installing = false; throw e }
+    }
+
     data class Available(val versionCode: Int, val versionName: String, val apkUrl: String, val sizeBytes: Long)
 
     /** Returns a newer release, or null if up to date / offline / not checkable. */
@@ -84,18 +93,54 @@ object Updater {
     }
 }
 
-/** Receives the install outcome; opens Android's confirmation screen when it asks for one. */
+/** True while Mettle is on screen (set by MainActivity). */
+object AppVisibility { @Volatile var foreground = false }
+
+/**
+ * Receives the install outcome. If Android needs a one-time confirmation it is
+ * shown directly when Mettle is open, otherwise as a notification.
+ */
 class InstallResultReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        when (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
-            PackageInstaller.STATUS_PENDING_USER_ACTION -> {
-                @Suppress("DEPRECATION")
-                val confirm = (if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
-                    else intent.getParcelableExtra(Intent.EXTRA_INTENT)) ?: return
-                confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(confirm)
+        Updater.installing = false
+        if (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE) != PackageInstaller.STATUS_PENDING_USER_ACTION) return
+        @Suppress("DEPRECATION")
+        val confirm = (if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
+            else intent.getParcelableExtra(Intent.EXTRA_INTENT)) ?: return
+        confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (AppVisibility.foreground) {
+            runCatching { context.startActivity(confirm) }
+        } else {
+            val nm = context.getSystemService(android.app.NotificationManager::class.java)
+            if (nm.getNotificationChannel("updates") == null) {
+                nm.createNotificationChannel(android.app.NotificationChannel("updates", "App updates", android.app.NotificationManager.IMPORTANCE_DEFAULT))
             }
-            else -> Unit   // success restarts the app on the new version; failures are retried next launch
+            val pi = PendingIntent.getActivity(context, 42, confirm, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            nm.notify(42, androidx.core.app.NotificationCompat.Builder(context, "updates")
+                .setSmallIcon(app.mettle.R.drawable.ic_stat_mettle)
+                .setContentTitle("Mettle update ready")
+                .setContentText("Tap to finish installing. Later updates install by themselves.")
+                .setContentIntent(pi).setAutoCancel(true).build())
+        }
+    }
+}
+
+/** Checks for and installs updates in the background, even when the app is closed. */
+class UpdateWorker(context: Context, params: androidx.work.WorkerParameters) : androidx.work.CoroutineWorker(context, params) {
+    override suspend fun doWork(): Result {
+        if (Build.VERSION.SDK_INT >= 26 && !applicationContext.packageManager.canRequestPackageInstalls()) return Result.success()
+        val update = Updater.check() ?: return Result.success()
+        return runCatching { Updater.installOnce(applicationContext, update) {} ; Result.success() }.getOrElse { Result.retry() }
+    }
+
+    companion object {
+        fun schedule(context: Context) {
+            val constraints = androidx.work.Constraints.Builder()
+                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED).setRequiresBatteryNotLow(true).build()
+            androidx.work.WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                "auto-update", androidx.work.ExistingPeriodicWorkPolicy.KEEP,
+                androidx.work.PeriodicWorkRequestBuilder<UpdateWorker>(3, java.util.concurrent.TimeUnit.HOURS).setConstraints(constraints).build(),
+            )
         }
     }
 }

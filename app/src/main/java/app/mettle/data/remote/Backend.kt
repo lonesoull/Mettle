@@ -1,6 +1,9 @@
 package app.mettle.data.remote
 
+import android.content.Context
 import app.mettle.BuildConfig
+import com.russhwolf.settings.SharedPreferencesSettings
+import io.github.jan.supabase.auth.SettingsSessionManager
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.auth.OtpType
@@ -46,9 +49,30 @@ sealed interface AuthState {
 
 /** Single connection to the Mettle server (Supabase). */
 object Backend {
+    private lateinit var appContext: Context
+
+    /** Called once from MettleApplication so the login is stored in Mettle's own private storage. */
+    fun init(context: Context) {
+        appContext = context.applicationContext
+        // One-time move of a login saved by older versions (default settings file) into Mettle's own file.
+        val target = appContext.getSharedPreferences("mettle_session", Context.MODE_PRIVATE)
+        if (target.all.isEmpty()) {
+            val old = appContext.getSharedPreferences("${appContext.packageName}_preferences", Context.MODE_PRIVATE)
+            val edit = target.edit()
+            old.all.forEach { (k, v) -> if (v is String) edit.putString(k, v) }
+            edit.apply()
+        }
+    }
+
     val client: SupabaseClient by lazy {
         createSupabaseClient(BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_KEY) {
-            install(Auth)
+            install(Auth) {
+                // Keep the login across restarts and updates; it only ends when you press Sign out.
+                sessionManager = SettingsSessionManager(
+                    SharedPreferencesSettings(appContext.getSharedPreferences("mettle_session", Context.MODE_PRIVATE)),
+                )
+                alwaysAutoRefresh = true
+            }
             install(Postgrest)
         }
     }
@@ -61,7 +85,8 @@ object Backend {
                     if (user != null) AuthState.SignedIn(user.id, user.email) else AuthState.Loading
                 }
                 is SessionStatus.NotAuthenticated -> AuthState.SignedOut
-                is SessionStatus.RefreshFailure -> AuthState.Loading   // offline: keep waiting, session is kept
+                // Offline or server slow: the saved login is still valid locally, so stay signed in.
+                is SessionStatus.RefreshFailure -> client.auth.currentUserOrNull()?.let { AuthState.SignedIn(it.id, it.email) } ?: AuthState.Loading
                 SessionStatus.Initializing -> AuthState.Loading
             }
         }

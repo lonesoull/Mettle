@@ -33,56 +33,67 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import app.mettle.ui.theme.MettleColors
 import kotlinx.coroutines.launch
 
-/** Orange bar shown at the top of the app when a newer version exists. */
+/**
+ * Automatic updates while the app is open: as soon as a newer version is found it
+ * downloads and installs by itself. The bar only shows progress, or a one-time
+ * request to let Mettle install updates.
+ */
 @Composable
 fun UpdateBanner() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var available by remember { mutableStateOf<Updater.Available?>(null) }
     var progress by remember { mutableStateOf<Float?>(null) }
-    var message by remember { mutableStateOf<String?>(null) }
+    var needsPermission by remember { mutableStateOf(false) }
+    var failed by remember { mutableStateOf(false) }
     var checks by remember { mutableStateOf(0) }
 
     LifecycleResumeEffect(Unit) { checks++; onPauseOrDispose { } }
-    LaunchedEffect(checks) { if (progress == null) available = Updater.check() }
+    LaunchedEffect(checks) {
+        if (progress != null || Updater.installing) return@LaunchedEffect
+        val update = Updater.check() ?: return@LaunchedEffect
+        available = update
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !context.packageManager.canRequestPackageInstalls()) {
+            needsPermission = true
+            return@LaunchedEffect
+        }
+        needsPermission = false
+        failed = false
+        progress = 0f
+        scope.launch {
+            runCatching { Updater.installOnce(context, update) { p -> progress = p } }
+                .onFailure { progress = null; failed = true }
+        }
+    }
 
     val update = available ?: return
+    if (progress == null && !needsPermission && !failed) return
     Column(
         Modifier.fillMaxWidth().background(MettleColors.Ink).statusBarsPadding()
-            .clickable(enabled = progress == null, role = Role.Button) {
-                val pm = context.packageManager
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !pm.canRequestPackageInstalls()) {
-                    message = "Allow Mettle to install updates, then tap again."
+            .clickable(enabled = needsPermission || failed, role = Role.Button) {
+                if (needsPermission) {
                     context.startActivity(
                         Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
                             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                     )
-                    return@clickable
-                }
-                message = null
-                progress = 0f
-                scope.launch {
-                    runCatching { Updater.install(context, update) { p -> progress = p } }
-                        .onFailure { progress = null; message = "Update failed. Check your connection and tap to try again." }
-                }
+                } else checks++
             }
             .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                when (val p = progress) {
-                    null -> "Update to Mettle ${update.versionName} — tap to install"
-                    else -> if (p < 1f) "Downloading update… ${(p * 100).toInt()}%" else "Installing…"
-                },
-                style = MaterialTheme.typography.titleSmall, color = MettleColors.Surface,
-            )
-        }
+        Text(
+            when {
+                needsPermission -> "One-time step: tap, then allow Mettle to install its own updates"
+                failed -> "Update to ${update.versionName} didn't finish — tap to retry"
+                (progress ?: 0f) < 1f -> "Updating Mettle to ${update.versionName}… ${((progress ?: 0f) * 100).toInt()}%"
+                else -> "Installing update…"
+            },
+            style = MaterialTheme.typography.titleSmall, color = MettleColors.Surface,
+        )
         progress?.let {
             LinearProgressIndicator(
                 progress = { it }, color = MettleColors.Orange, trackColor = MettleColors.Ink2,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(4.dp).clip(RoundedCornerShape(2.dp)),
             )
         }
-        message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MettleColors.OrangeTint, modifier = Modifier.padding(top = 4.dp)) }
     }
 }

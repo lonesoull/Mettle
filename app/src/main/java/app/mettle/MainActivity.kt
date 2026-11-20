@@ -19,4 +19,7 @@ class MainActivity : ComponentActivity() {
         val db = (application as MettleApplication).database
         setContent { MettleTheme { Root(db) } }
     }
+
+    override fun onStart() { super.onStart(); app.mettle.update.AppVisibility.foreground = true }
+    override fun onStop() { app.mettle.update.AppVisibility.foreground = false; super.onStop() }
 }
