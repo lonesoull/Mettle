@@ -109,6 +109,8 @@ private data class ActivityRow(
     val device: String?,
     @SerialName("deleted_at") val deletedAt: String?,
     @SerialName("place_id") val placeId: String?,
+    @SerialName("avg_hr") val avgHr: Int?,
+    @SerialName("max_hr") val maxHr: Int?,
 )
 
 @Serializable
@@ -249,7 +251,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                         Instant.ofEpochMilli(a.startedAt).toString(), a.timezone, a.elapsedS, a.movingS, a.distanceM,
                         a.elevGainM, a.elevLossM, a.floorsUp, a.floorsDown, a.avgPaceSKm, a.gapSKm, a.avgCadenceSpm, a.calories,
                         a.rpe, a.trainingLoad, a.visibility.name.lowercase(), lineString(route), lineString(public), streamsPath, a.device,
-                        a.deletedAt?.let { Instant.ofEpochMilli(it).toString() }, a.placeId,
+                        a.deletedAt?.let { Instant.ofEpochMilli(it).toString() }, a.placeId, a.avgHr, a.maxHr,
                     ),
                 ) { onConflict = "id" }
                 val laps = db.laps().forActivityNow(a.id)
@@ -323,6 +325,9 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                 }) { onConflict = "id" }
                 tPrefs.edit().putString(TrackingService.KEY_GAPS, "[]").apply()
             }
+
+            // Health: fingertip checks, Health Connect sleep and resting heart rate, connected devices.
+            runCatching { app.mettle.health.HealthSync.run(applicationContext, userId) }
 
             // Arrive/leave rules that watch this person.
             runCatching { app.mettle.safety.Geofences.refresh(applicationContext, userId) }

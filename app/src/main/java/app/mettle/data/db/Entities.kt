@@ -44,6 +44,8 @@ data class ActivityEntity(
     val heatAdjPaceSKm: Double? = null,
     val avgCadenceSpm: Int? = null,
     val calories: Int? = null,
+    val avgHr: Int? = null,
+    val maxHr: Int? = null,
     val rpe: Int? = null,
     val trainingLoad: Int? = null,
     val downhillStress: Int? = null,
@@ -200,6 +202,7 @@ data class RecordingSampleEntity(
     val paused: Boolean,
     val pressureHpa: Float? = null,
     @androidx.room.ColumnInfo(defaultValue = "0") val lap: Boolean = false,
+    val heartRate: Int? = null,
 )
 
 /** All-day tracking: what happened in each minute of the day (local only, summarised for the server). */

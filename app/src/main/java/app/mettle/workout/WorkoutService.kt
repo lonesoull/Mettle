@@ -68,6 +68,7 @@ data class LiveWorkout(
     val climbing: Boolean? = null,
     val sets: List<app.mettle.stairs.StairSet> = emptyList(),
     val hasBarometer: Boolean = false,
+    val heartRate: Int? = null,
 )
 
 /**
@@ -104,7 +105,7 @@ class WorkoutService : Service(), SensorEventListener {
                     db.recording().insert(RecordingSampleEntity(
                         sessionId = live.sessionId!!, tMs = l.time, lat = l.latitude, lon = l.longitude,
                         accuracyM = s.accuracyM, altitudeM = s.altitudeM, speedMs = if (l.hasSpeed()) l.speed else null,
-                        steps = steps, paused = live.paused, pressureHpa = pressure,
+                        steps = steps, paused = live.paused, pressureHpa = pressure, heartRate = app.mettle.health.HeartRateBle.bpm.value,
                     ))
                 }
                 state.value = state.value.copy(gpsAccuracyM = s.accuracyM)
@@ -140,6 +141,7 @@ class WorkoutService : Service(), SensorEventListener {
         getSharedPreferences("workout", MODE_PRIVATE).edit().putString("session", id).putString("type", type.name)
             .putLong("started", state.value.startedAt).putBoolean("machine", machine).putString("place", placeId).apply()
         startInForeground()
+        app.mettle.health.HeartRateBle.connect(this)
         synchronized(stepTimes) { stepTimes.clear(); altitude.clear(); laps.clear() }
         if (type == ActivityType.STAIRS) {
             scope.launch {
@@ -162,6 +164,7 @@ class WorkoutService : Service(), SensorEventListener {
     private fun finish() {
         state.value = state.value.copy(recording = false)
         tts?.shutdown(); tts = null
+        app.mettle.health.HeartRateBle.disconnect()
         sensors.unregisterListener(this)
         runCatching { LocationServices.getFusedLocationProviderClient(this).removeLocationUpdates(locationCallback) }
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -174,6 +177,7 @@ class WorkoutService : Service(), SensorEventListener {
     private suspend fun ticker() {
         var n = 0
         while (scope.isActive && state.value.recording) {
+            state.value = state.value.copy(heartRate = app.mettle.health.HeartRateBle.bpm.value)
             if (state.value.type == ActivityType.STAIRS) {
                 val (st, al, lp) = synchronized(stepTimes) { Triple(ArrayList(stepTimes), ArrayList(altitude), ArrayList(laps)) }
                 val r = app.mettle.stairs.StairMath.analyse(st, al.takeIf { state.value.hasBarometer && it.size > 3 }, stepsPerFloor, floorHeight, lp, state.value.machine)
@@ -262,7 +266,8 @@ class WorkoutService : Service(), SensorEventListener {
         val live = state.value
         scope.launch {
             db.recording().insert(RecordingSampleEntity(sessionId = live.sessionId!!, tMs = t, lat = null, lon = null, accuracyM = null,
-                altitudeM = null, speedMs = null, steps = steps, paused = live.paused, pressureHpa = pressure, lap = lap))
+                altitudeM = null, speedMs = null, steps = steps, paused = live.paused, pressureHpa = pressure, lap = lap,
+                heartRate = app.mettle.health.HeartRateBle.bpm.value))
         }
     }
 

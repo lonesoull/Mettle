@@ -61,7 +61,7 @@ private const val DEFAULT_KM_GOAL = 25_000L
 private const val DEFAULT_FLOORS_GOAL = 200L
 
 @Composable
-fun HomeScreen(db: MettleDatabase, onRecord: () -> Unit, onProgress: () -> Unit, onSetup: () -> Unit, onReplay: () -> Unit, onSafety: () -> Unit, onOpen: (String) -> Unit, onResumeSave: () -> Unit) {
+fun HomeScreen(db: MettleDatabase, onRecord: () -> Unit, onProgress: () -> Unit, onSetup: () -> Unit, onReplay: () -> Unit, onSafety: () -> Unit, onHealth: () -> Unit, onOpen: (String) -> Unit, onResumeSave: () -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     var trackingOn by remember { androidx.compose.runtime.mutableStateOf(false) }
     androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
@@ -85,6 +85,7 @@ fun HomeScreen(db: MettleDatabase, onRecord: () -> Unit, onProgress: () -> Unit,
             val live = app.mettle.workout.WorkoutService.live.value
             if (live.recording) item { Banner("Workout in progress — tap to return", onRecord) }
             else if (app.mettle.workout.WorkoutService.unfinished(ctx) != null) item { Banner("You have an unsaved workout — tap to save it", onResumeSave) }
+            item { ReadinessCard(onHealth) }
             item { TodayCard(db, trackingOn, onSetup, onReplay) }
             item { WeekCard(totals, week, weekStart, zone, onProgress) }
             if (recent.isEmpty()) {
@@ -216,5 +217,22 @@ private fun ActivityCard(a: ActivityEntity, zone: ZoneId, onOpen: (String) -> Un
 private fun Banner(text: String, onClick: () -> Unit) {
     Box(Modifier.fillMaxWidth().background(MettleColors.Orange).clickable(onClick = onClick).padding(16.dp)) {
         Text(text, style = androidx.compose.material3.MaterialTheme.typography.titleSmall, color = MettleColors.Surface)
+    }
+}
+
+/** Shown only when there is something to base readiness on. */
+@Composable
+private fun ReadinessCard(onHealth: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val r by androidx.compose.runtime.produceState<Int?>(null) { value = runCatching { app.mettle.health.HealthStore.readiness(ctx) }.getOrNull() }
+    val score = r ?: return
+    Section(Modifier.clickable(onClick = onHealth)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text("$score", style = MettleType.StatLarge, color = if (score >= 50) MettleColors.Good else MettleColors.Warn)
+            Column {
+                Text("Readiness", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
+                Text(app.mettle.ui.health.readinessWord(score), style = androidx.compose.material3.MaterialTheme.typography.bodyMedium, color = MettleColors.Ink2)
+            }
+        }
     }
 }

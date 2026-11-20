@@ -34,6 +34,9 @@ interface ActivityDao {
     @Query("SELECT * FROM activities WHERE deletedAt IS NULL AND startedAt >= :fromMs AND startedAt < :toMs ORDER BY startedAt")
     fun between(fromMs: Long, toMs: Long): Flow<List<ActivityEntity>>
 
+    @Query("SELECT * FROM activities WHERE deletedAt IS NULL AND startedAt >= :fromMs AND startedAt < :toMs ORDER BY startedAt")
+    suspend fun betweenNow(fromMs: Long, toMs: Long): List<ActivityEntity>
+
     @Query("SELECT * FROM activities WHERE syncState = 'DIRTY'")
     suspend fun dirty(): List<ActivityEntity>
 

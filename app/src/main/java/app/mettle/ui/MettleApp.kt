@@ -39,7 +39,7 @@ fun MettleApp(db: MettleDatabase, profile: Profile, onSignOut: () -> Unit) {
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
     val current = backStack?.destination
-    val onRecord = current?.route in setOf(Tab.Record.route, "recording", "save", "setup", "calibrate/{id}", "activity/{id}", "sensorlab", "admin", "replay", "member/{id}/{name}", "memberreplay/{id}/{name}", "safety") || current?.route?.startsWith("activity") == true
+    val onRecord = current?.route in setOf(Tab.Record.route, "recording", "save", "setup", "calibrate/{id}", "activity/{id}", "sensorlab", "admin", "replay", "member/{id}/{name}", "memberreplay/{id}/{name}", "safety", "health", "fingertip") || current?.route?.startsWith("activity") == true
 
     Scaffold(
         containerColor = MettleColors.Band,
@@ -77,7 +77,7 @@ fun MettleApp(db: MettleDatabase, profile: Profile, onSignOut: () -> Unit) {
         NavHost(nav, startDestination = Tab.Home.route, modifier = Modifier.padding(padding)) {
             composable(Tab.Home.route) {
                 HomeScreen(db, onRecord = { nav.navigate(Tab.Record.route) }, onProgress = { nav.navigate(Tab.Progress.route) },
-                    onSetup = { nav.navigate("setup") }, onReplay = { nav.navigate("replay") }, onSafety = { nav.navigate("safety") }, onOpen = { id -> nav.navigate("activity/$id") }, onResumeSave = { nav.navigate("save") })
+                    onSetup = { nav.navigate("setup") }, onReplay = { nav.navigate("replay") }, onSafety = { nav.navigate("safety") }, onHealth = { nav.navigate("health") }, onOpen = { id -> nav.navigate("activity/$id") }, onResumeSave = { nav.navigate("save") })
             }
             composable("recording") {
                 val live by app.mettle.workout.WorkoutService.live.collectAsState()
@@ -101,7 +101,9 @@ fun MettleApp(db: MettleDatabase, profile: Profile, onSignOut: () -> Unit) {
                     onCalibrate = { id -> nav.navigate("calibrate/$id") })
             }
             composable("calibrate/{id}") { e -> app.mettle.ui.stairs.CalibrationScreen(db, e.arguments?.getString("id") ?: "", onDone = { nav.popBackStack() }) }
-            composable(Tab.Progress.route) { ProgressScreen(db, profile, onSensorLab = { nav.navigate("sensorlab") }, onAdmin = { nav.navigate("admin") }) }
+            composable(Tab.Progress.route) { ProgressScreen(db, profile, onSensorLab = { nav.navigate("sensorlab") }, onAdmin = { nav.navigate("admin") }, onHealth = { nav.navigate("health") }) }
+            composable("health") { app.mettle.ui.health.HealthScreen(onFingertip = { nav.navigate("fingertip") }, onBack = { nav.popBackStack() }) }
+            composable("fingertip") { app.mettle.ui.health.FingertipScreen(onDone = { nav.popBackStack() }) }
             composable("safety") { app.mettle.ui.safety.SafetyScreen(onBack = { nav.popBackStack() }) }
             composable("replay") {
                 val ctx = androidx.compose.ui.platform.LocalContext.current

@@ -75,6 +75,8 @@ object WorkoutSaver {
                 elapsedS = elapsed, movingS = r.movingS, distanceM = r.distanceM,
                 elevGainM = r.elevGainM, elevLossM = r.elevLossM,
                 avgPaceSKm = r.avgPaceSKm, gapSKm = r.gapSKm, avgCadenceSpm = r.avgCadence, calories = calories,
+                avgHr = raw.mapNotNull { it.heartRate }.takeIf { it.size > 10 }?.average()?.roundToInt(),
+                maxHr = raw.mapNotNull { it.heartRate }.maxOrNull(),
                 rpe = details.rpe, trainingLoad = details.rpe?.let { it * r.movingS / 60 },
                 visibility = details.visibility, routePolyline = polyline, streamsFile = streamsFile(context, id).name,
                 device = android.os.Build.MODEL, createdAt = now, updatedAt = now, syncState = SyncState.DIRTY,
@@ -125,6 +127,8 @@ object WorkoutSaver {
                 // Climbing ≈ 1.1 kcal per kg per 100 m up; descending about a third of that.
                 calories = (body.weightKg * (r.floorsUp * fh * 0.011 + r.floorsDown * fh * 0.004)).roundToInt(),
                 rpe = details.rpe, trainingLoad = details.rpe?.let { it * elapsed / 60 },
+                avgHr = raw.mapNotNull { it.heartRate }.takeIf { it.size > 10 }?.average()?.roundToInt(),
+                maxHr = raw.mapNotNull { it.heartRate }.maxOrNull(),
                 placeId = place?.id, visibility = details.visibility, device = android.os.Build.MODEL,
                 createdAt = now, updatedAt = now, syncState = SyncState.DIRTY,
             ),

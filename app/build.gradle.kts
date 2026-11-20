@@ -88,6 +88,11 @@ dependencies {
     implementation(libs.maps.compose)
     implementation(libs.play.services.maps)
     implementation(libs.supabase.storage)
+    implementation(libs.camera.camera2)
+    implementation(libs.camera.lifecycle)
+    implementation(libs.concurrent.futures)
+    implementation("com.google.guava:guava:33.3.1-android")
+    implementation(libs.health.connect)
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)
 }

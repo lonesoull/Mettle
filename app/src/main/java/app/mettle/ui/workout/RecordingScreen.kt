@@ -65,7 +65,7 @@ fun RecordingScreen(onFinished: (sessionId: String) -> Unit) {
                 Big("pace /km", Fmt.pace(live.currentPaceSKm), Modifier.weight(1f), MettleColors.Orange)
                 Big("avg /km", Fmt.pace(live.avgPaceSKm), Modifier.weight(1f))
             }
-            Text("Climb ${live.elevGainM.toInt()} m · Elapsed ${Fmt.duration(live.elapsedS.toLong())}",
+            Text((live.heartRate?.let { "♥ $it bpm · " } ?: "") + "Climb ${live.elevGainM.toInt()} m · Elapsed ${Fmt.duration(live.elapsedS.toLong())}",
                 style = MettleType.Label, color = MettleColors.Sub, modifier = Modifier.align(Alignment.CenterHorizontally))
             Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (live.paused) {
