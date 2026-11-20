@@ -105,6 +105,7 @@ class TrackingService : Service(), SensorEventListener {
         startInForeground()
         if (!TrackingState.running) {
             TrackingState.running = true
+            recordGapSinceLastHeartbeat()
             prefs.edit().putLong(KEY_SERVICE_START, System.currentTimeMillis()).apply()
             registerSensors()
             registerActivityRecognition()
@@ -259,6 +260,7 @@ class TrackingService : Service(), SensorEventListener {
                     }
                 }
             }
+            prefs.edit().putLong(KEY_HEARTBEAT, System.currentTimeMillis()).apply()
             if (minute % 5 == 0) {
                 val steps = db.day().minutesNow(day).sumOf { it.steps }
                 getSystemService(NotificationManager::class.java)
@@ -332,6 +334,18 @@ class TrackingService : Service(), SensorEventListener {
         }
     }
 
+    /** If tracking was off for more than 10 minutes, remember when and why (phone off vs app stopped). */
+    private fun recordGapSinceLastHeartbeat() {
+        val last = prefs.getLong(KEY_HEARTBEAT, 0L)
+        val now = System.currentTimeMillis()
+        if (last == 0L || now - last < 10 * 60_000L) return
+        val bootAt = now - SystemClock.elapsedRealtime()
+        val reason = if (bootAt > last) "phone_off" else "app_stopped"
+        val pending = org.json.JSONArray(prefs.getString(KEY_GAPS, "[]"))
+        pending.put(org.json.JSONObject().put("start", last).put("end", now).put("reason", reason))
+        prefs.edit().putString(KEY_GAPS, pending.toString()).apply()
+    }
+
     private fun has(p: String) = ContextCompat.checkSelfPermission(this, p) == PackageManager.PERMISSION_GRANTED
 
     companion object {
@@ -340,6 +354,8 @@ class TrackingService : Service(), SensorEventListener {
         const val ACTION_STOP = "app.mettle.STOP_TRACKING"
         private const val KEY_LAST_COUNTER = "last_step_counter"
         private const val KEY_SERVICE_START = "service_start"
+        private const val KEY_HEARTBEAT = "heartbeat"
+        const val KEY_GAPS = "pending_gaps"
 
         fun start(context: Context) {
             context.getSharedPreferences("tracking", MODE_PRIVATE).edit().putBoolean("enabled", true).apply()

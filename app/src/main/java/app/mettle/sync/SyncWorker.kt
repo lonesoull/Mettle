@@ -138,6 +138,28 @@ private data class PlaceRow(
 )
 
 @Serializable
+private data class DayTrackRow(
+    @SerialName("user_id") val userId: String, val day: String, val timezone: String,
+    @SerialName("file_path") val filePath: String, val points: Int, @SerialName("distance_m") val distanceM: Int,
+)
+
+@Serializable
+private data class StayRow(
+    val id: String, @SerialName("user_id") val userId: String, @SerialName("start_at") val startAt: String, @SerialName("end_at") val endAt: String,
+    val location: String, @SerialName("altitude_m") val altitudeM: Double?, @SerialName("accuracy_m") val accuracyM: Float, val label: String?,
+)
+
+@Serializable
+private data class GapRow(val id: String, @SerialName("user_id") val userId: String, @SerialName("start_at") val startAt: String,
+                          @SerialName("end_at") val endAt: String, val reason: String)
+
+/** One day's 3D track (compressed JSON) — same format the admin replay reads. */
+@Serializable
+data class DayTrackFile(val v: Int = 1, val t: List<Long>, val lat: List<Double>, val lon: List<Double>, val alt: List<Double?>,
+                        @SerialName("h_acc") val hAcc: List<Float?>, @SerialName("v_acc") val vAcc: List<Float?>,
+                        val hpa: List<Float?>, val state: List<String>)
+
+@Serializable
 private data class CapabilitiesRow(@SerialName("phone_capabilities") val capabilities: JsonObject)
 
 /**
@@ -236,6 +258,60 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                     EffortRow(e.id, userId, a.id, e.effort, e.timeS, e.startOffsetS, e.endOffsetS, e.rankAtTime, Instant.ofEpochMilli(e.achievedAt).toString())
                 }) { onConflict = "id" }
                 db.activities().markSynced(a.id, a.updatedAt)
+            }
+
+            // All-day track files and stays (today, plus any day with new points since last time).
+            val lastTrackSync = prefs.getLong("tracks_synced_at", 0L)
+            val trackDays = (days + listOf(LocalDate.now(zone).minusDays(1).toString())).distinct()
+            val allStays = ArrayList<app.mettle.space.Stay>()
+            for (day in trackDays) {
+                val date = LocalDate.parse(day)
+                val from = date.atStartOfDay(zone).toInstant().toEpochMilli(); val to = date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+                val pts = db.track().between(from, to)
+                if (pts.isEmpty() || (pts.last().tMs < lastTrackSync && day != LocalDate.now(zone).toString())) continue
+                val file = DayTrackFile(1, pts.map { it.tMs / 1000 }, pts.map { it.lat }, pts.map { it.lon }, pts.map { it.altitudeM },
+                    pts.map { it.accuracyM }, pts.map { it.verticalAccuracyM }, pts.map { it.pressureHpa }, pts.map { it.state.toServer() })
+                val bytes = java.io.ByteArrayOutputStream().also { o ->
+                    java.util.zip.GZIPOutputStream(o).use { it.write(kotlinx.serialization.json.Json.encodeToString(DayTrackFile.serializer(), file).toByteArray()) }
+                }.toByteArray()
+                val path = "$userId/$day.json.gz"
+                Backend.client.storage.from("tracks").upload(path, bytes) { upsert = true }
+                var dist = 0.0
+                for (k in 1 until pts.size) if ((pts[k].accuracyM ?: 0f) <= 50f) dist += app.mettle.workout.WorkoutMath.haversineM(pts[k - 1].lat, pts[k - 1].lon, pts[k].lat, pts[k].lon)
+                Backend.client.from("day_tracks").upsert(DayTrackRow(userId, day, zone.id, path, pts.size, dist.toInt())) { onConflict = "user_id,day" }
+
+                val stays = app.mettle.space.StayMath.stays(pts.map { app.mettle.space.TrackPt(it.tMs, it.lat, it.lon, it.accuracyM, it.altitudeM) })
+                allStays += stays
+                Backend.client.from("stays").delete { filter { eq("user_id", userId); gte("start_at", Instant.ofEpochMilli(from).toString()); lt("start_at", Instant.ofEpochMilli(to).toString()) } }
+                if (stays.isNotEmpty()) {
+                    val known = app.mettle.space.Places.known(applicationContext)
+                    Backend.client.from("stays").insert(stays.map { st ->
+                        StayRow(UUID.nameUUIDFromBytes("$userId/stay/${st.startMs}".toByteArray()).toString(), userId,
+                            Instant.ofEpochMilli(st.startMs).toString(), Instant.ofEpochMilli(st.endMs).toString(),
+                            "SRID=4326;POINT(${st.lon} ${st.lat})", st.altitudeM, st.accuracyM, app.mettle.space.StayMath.label(st, known))
+                    })
+                }
+            }
+            prefs.edit().putLong("tracks_synced_at", startedAt).apply()
+            // Re-learn Home / Work from the last 3 weeks once a day.
+            if (System.currentTimeMillis() - prefs.getLong("places_learned_at", 0L) > 24 * 3_600_000L) {
+                val since = LocalDate.now(zone).minusDays(21).atStartOfDay(zone).toInstant().toEpochMilli()
+                val history = db.track().between(since, System.currentTimeMillis())
+                app.mettle.space.Places.save(applicationContext, app.mettle.space.StayMath.learnPlaces(
+                    app.mettle.space.StayMath.stays(history.map { app.mettle.space.TrackPt(it.tMs, it.lat, it.lon, it.accuracyM, it.altitudeM) }), zone))
+                prefs.edit().putLong("places_learned_at", System.currentTimeMillis()).apply()
+            }
+
+            // Tracking gaps (phone off / app stopped).
+            val tPrefs = applicationContext.getSharedPreferences("tracking", Context.MODE_PRIVATE)
+            val gaps = org.json.JSONArray(tPrefs.getString(TrackingService.KEY_GAPS, "[]"))
+            if (gaps.length() > 0) {
+                Backend.client.from("tracking_gaps").upsert((0 until gaps.length()).map { k ->
+                    val g = gaps.getJSONObject(k)
+                    GapRow(UUID.nameUUIDFromBytes("$userId/gap/${g.getLong("start")}".toByteArray()).toString(), userId,
+                        Instant.ofEpochMilli(g.getLong("start")).toString(), Instant.ofEpochMilli(g.getLong("end")).toString(), g.getString("reason"))
+                }) { onConflict = "id" }
+                tPrefs.edit().putString(TrackingService.KEY_GAPS, "[]").apply()
             }
 
             // Live status for the admin map.

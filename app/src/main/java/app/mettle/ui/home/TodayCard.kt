@@ -65,7 +65,7 @@ private fun stateLabel(s: DayState) = when (s) {
 }
 
 @Composable
-fun TodayCard(db: MettleDatabase, trackingOn: Boolean, onSetup: () -> Unit) {
+fun TodayCard(db: MettleDatabase, trackingOn: Boolean, onSetup: () -> Unit, onReplay: () -> Unit) {
     val context = LocalContext.current
     val zone = remember { ZoneId.systemDefault() }
     val today = remember { LocalDate.now(zone).toString() }
@@ -78,7 +78,11 @@ fun TodayCard(db: MettleDatabase, trackingOn: Boolean, onSetup: () -> Unit) {
 
     Section {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("Today", style = MaterialTheme.typography.titleLarge)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Today", style = MaterialTheme.typography.titleLarge)
+                Text("Replay day ›", style = MaterialTheme.typography.titleSmall, color = MettleColors.Orange,
+                    modifier = Modifier.clickable(role = Role.Button, onClick = onReplay).padding(vertical = 6.dp))
+            }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Box(Modifier.size(8.dp).clip(CircleShape).background(if (trackingOn) MettleColors.Good else MettleColors.Warn))
                 Text(if (trackingOn) "Tracking" else "Tracking off", style = MettleType.Label, color = MettleColors.Sub)

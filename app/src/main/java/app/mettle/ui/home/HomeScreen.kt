@@ -61,7 +61,7 @@ private const val DEFAULT_KM_GOAL = 25_000L
 private const val DEFAULT_FLOORS_GOAL = 200L
 
 @Composable
-fun HomeScreen(db: MettleDatabase, onRecord: () -> Unit, onProgress: () -> Unit, onSetup: () -> Unit, onOpen: (String) -> Unit, onResumeSave: () -> Unit) {
+fun HomeScreen(db: MettleDatabase, onRecord: () -> Unit, onProgress: () -> Unit, onSetup: () -> Unit, onReplay: () -> Unit, onOpen: (String) -> Unit, onResumeSave: () -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     var trackingOn by remember { androidx.compose.runtime.mutableStateOf(false) }
     androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
@@ -83,7 +83,7 @@ fun HomeScreen(db: MettleDatabase, onRecord: () -> Unit, onProgress: () -> Unit,
             val live = app.mettle.workout.WorkoutService.live.value
             if (live.recording) item { Banner("Workout in progress — tap to return", onRecord) }
             else if (app.mettle.workout.WorkoutService.unfinished(ctx) != null) item { Banner("You have an unsaved workout — tap to save it", onResumeSave) }
-            item { TodayCard(db, trackingOn, onSetup) }
+            item { TodayCard(db, trackingOn, onSetup, onReplay) }
             item { WeekCard(totals, week, weekStart, zone, onProgress) }
             if (recent.isEmpty()) {
                 item { EmptyFeed(onRecord) }
