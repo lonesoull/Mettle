@@ -2,6 +2,7 @@ package app.mettle.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
@@ -20,6 +21,7 @@ import app.mettle.data.remote.Profile
 import app.mettle.ui.auth.ProfileSetupScreen
 import app.mettle.ui.auth.SignInScreen
 import app.mettle.ui.theme.MettleColors
+import app.mettle.update.UpdateBanner
 
 /** Signed out → sign in; signed in without height → profile setup; otherwise the app. */
 @Composable
@@ -38,11 +40,22 @@ fun Root(db: MettleDatabase) {
         }
     }
 
+    Column(Modifier.fillMaxSize()) {
+        UpdateBanner()
+        Box(Modifier.weight(1f)) { RootContent(db, auth, signedIn, profile, profileLoaded) { profile = it } }
+    }
+}
+
+@Composable
+private fun RootContent(
+    db: MettleDatabase, auth: AuthState, signedIn: AuthState.SignedIn?, profile: Profile?, profileLoaded: Boolean,
+    onProfile: (Profile) -> Unit,
+) {
     when {
         auth is AuthState.SignedOut -> SignInScreen()
         signedIn == null || !profileLoaded -> Loading()
-        profile?.isComplete != true -> ProfileSetupScreen(signedIn.userId, profile) { profile = it }
-        else -> MettleApp(db, profile!!, onSignOut = { })
+        profile?.isComplete != true -> ProfileSetupScreen(signedIn.userId, profile, onProfile)
+        else -> MettleApp(db, profile, onSignOut = { })
     }
 }
 
