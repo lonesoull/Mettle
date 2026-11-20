@@ -66,7 +66,7 @@ Google requires a billing account even for its free map. These steps lock the ke
    - **Database password:** click **Generate a password**, then save it in your password manager. You won't need to give it to anyone.
    - **Region:** **South Asia (Mumbai)**.
    - Click **Create new project** and wait about 2 minutes.
-3. **Create the tables** — run the eight scripts **one at a time, in this order**:
+3. **Create the tables** — run the nine scripts **one at a time, in this order**:
    1. `20261119000000_init.sql`
    2. `20261120000000_all_day_and_admin.sql`
    3. `20261121000000_space_time_and_devices.sql`
@@ -75,6 +75,7 @@ Google requires a billing account even for its free map. These steps lock the ke
    6. `20261124000000_api_usage_limits.sql`
    7. `20261125000000_grants.sql`
    8. `20261126000000_advisor_fixes.sql`
+   9. `20261127000000_admin_views.sql`
 
    For each one:
    - Open it at **https://github.com/lonesoull/Mettle/tree/main/supabase/migrations** → click the file → click the **Copy raw file** icon (two overlapping squares, top-right of the code).

@@ -2,7 +2,6 @@ package app.mettle.ui
 
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
-import androidx.compose.ui.unit.dp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -40,7 +39,7 @@ fun MettleApp(db: MettleDatabase, profile: Profile, onSignOut: () -> Unit) {
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
     val current = backStack?.destination
-    val onRecord = current?.route in setOf(Tab.Record.route, "recording", "save", "setup", "calibrate/{id}", "activity/{id}", "sensorlab", "admin", "replay") || current?.route?.startsWith("activity") == true
+    val onRecord = current?.route in setOf(Tab.Record.route, "recording", "save", "setup", "calibrate/{id}", "activity/{id}", "sensorlab", "admin", "replay", "member/{id}/{name}", "memberreplay/{id}/{name}") || current?.route?.startsWith("activity") == true
 
     Scaffold(
         containerColor = MettleColors.Band,
@@ -112,9 +111,16 @@ fun MettleApp(db: MettleDatabase, profile: Profile, onSignOut: () -> Unit) {
                 }, onBack = { nav.popBackStack() })
             }
             composable("admin") {
-                androidx.compose.foundation.layout.Box(Modifier.padding(32.dp)) {
-                    Text("The admin dashboard (live group map) arrives in the next update.")
-                }
+                app.mettle.ui.admin.AdminScreen(onMember = { id, name -> nav.navigate("member/$id/${android.net.Uri.encode(name)}") }, onBack = { nav.popBackStack() })
+            }
+            composable("member/{id}/{name}") { e ->
+                val id = e.arguments?.getString("id") ?: ""; val name = e.arguments?.getString("name") ?: ""
+                app.mettle.ui.admin.MemberScreen(id, name, onReplay = { nav.navigate("memberreplay/$id/${android.net.Uri.encode(name)}") }, onBack = { nav.popBackStack() })
+            }
+            composable("memberreplay/{id}/{name}") { e ->
+                val id = e.arguments?.getString("id") ?: ""; val name = e.arguments?.getString("name") ?: ""
+                val places by androidx.compose.runtime.produceState(emptyList<app.mettle.space.KnownPlace>(), id) { value = app.mettle.ui.admin.loadMemberPlaces(id) }
+                app.mettle.ui.space.DayReplayScreen("$name's day", places, load = { d -> app.mettle.ui.admin.loadMemberDay(id, d) }, onBack = { nav.popBackStack() })
             }
             composable("sensorlab") { app.mettle.ui.lab.SensorLabScreen(onBack = { nav.popBackStack() }) }
         }
