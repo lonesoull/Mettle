@@ -76,6 +76,15 @@ fun ActivityDetailScreen(db: MettleDatabase, activityId: String, onBack: () -> U
                 Header(act)
             }
         }
+        item {
+            val insight by produceState<app.mettle.insight.Insight?>(null, act.id) { value = runCatching { app.mettle.insight.Insights.forActivity(context, act) }.getOrNull() }
+            insight?.let { ins ->
+                Section {
+                    Text(if (ins.ai) "✦ Mettle Insight · AI" else "✦ Mettle Insight", style = MaterialTheme.typography.titleSmall, color = MettleColors.Orange)
+                    Text(ins.text, style = MaterialTheme.typography.bodyLarge)
+                }
+            }
+        }
         if (streams != null && streams!!.dist.size > 10) item { Charts(streams!!) }
         val splits = laps.filter { it.kind == LapKind.AUTO_KM }
         if (splits.isNotEmpty()) item {

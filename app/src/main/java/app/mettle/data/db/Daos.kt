@@ -126,9 +126,14 @@ interface DayDao {
     @Query("SELECT DISTINCT day FROM day_minutes WHERE updatedAt >= :sinceMs")
     suspend fun daysChangedSince(sinceMs: Long): List<String>
 
+    @Query("SELECT day, SUM(steps) AS steps, SUM(floorsUp) AS floorsUp, SUM(CASE WHEN state = 'WALKING' THEN steps ELSE 0 END) AS walkSteps, SUM(CASE WHEN state = 'WALKING' THEN 1 ELSE 0 END) AS walkMin FROM day_minutes GROUP BY day ORDER BY day")
+    fun dailyTotals(): Flow<List<DayTotal>>
+
     @Query("DELETE FROM day_minutes WHERE day < :beforeDay")
     suspend fun deleteBefore(beforeDay: String)
 }
+
+data class DayTotal(val day: String, val steps: Int, val floorsUp: Int, val walkSteps: Int, val walkMin: Int)
 
 @Dao
 interface TrackDao {

@@ -88,6 +88,7 @@ dependencies {
     implementation(libs.maps.compose)
     implementation(libs.play.services.maps)
     implementation(libs.supabase.storage)
+    implementation(libs.supabase.functions)
     implementation(libs.camera.camera2)
     implementation(libs.camera.lifecycle)
     implementation(libs.concurrent.futures)

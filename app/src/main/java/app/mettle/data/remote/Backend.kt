@@ -75,6 +75,7 @@ object Backend {
             }
             install(Postgrest)
             install(io.github.jan.supabase.storage.Storage)
+            install(io.github.jan.supabase.functions.Functions)
         }
     }
 

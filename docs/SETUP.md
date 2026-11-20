@@ -66,7 +66,7 @@ Google requires a billing account even for its free map. These steps lock the ke
    - **Database password:** click **Generate a password**, then save it in your password manager. You won't need to give it to anyone.
    - **Region:** **South Asia (Mumbai)**.
    - Click **Create new project** and wait about 2 minutes.
-3. **Create the tables** — run the eleven scripts **one at a time, in this order**:
+3. **Create the tables** — run the twelve scripts **one at a time, in this order**:
    1. `20261119000000_init.sql`
    2. `20261120000000_all_day_and_admin.sql`
    3. `20261121000000_space_time_and_devices.sql`
@@ -78,6 +78,7 @@ Google requires a billing account even for its free map. These steps lock the ke
    9. `20261127000000_admin_views.sql`
    10. `20261128000000_alert_views.sql`
    11. `20261129000000_workout_heart_rate.sql`
+   12. `20261130000000_feed_v2.sql`
 
    For each one:
    - Open it at **https://github.com/lonesoull/Mettle/tree/main/supabase/migrations** → click the file → click the **Copy raw file** icon (two overlapping squares, top-right of the code).
@@ -97,4 +98,10 @@ Google requires a billing account even for its free map. These steps lock the ke
   where id = (select id from auth.users where email = 'YOUR-EMAIL');
   ```
 - Invite each member the same way; they create their own profile (including height) on first login.
-- The Gemini key goes into Supabase later (Edge Functions → Secrets) — Claude will give exact steps when that feature is built.
+
+### Optional: AI insights with Gemini (free)
+1. Get a key at **https://aistudio.google.com → Get API key**, in a project **without billing** (AI Studio's default), so it can never charge you.
+2. Supabase → **Edge Functions → Deploy a new function → Via editor**. Name it `insight`, paste the code from `supabase/functions/insight/index.ts`, click **Deploy**.
+3. Supabase → **Edge Functions → Secrets → Add new secret**: name `GEMINI_API_KEY`, value = your key.
+4. Optional: in the app as admin you can later enter your monthly token limit; insights switch to built-in text at 80% of it.
+Without these steps Mettle still shows insights, written from its built-in rules.

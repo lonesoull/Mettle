@@ -75,6 +75,7 @@ fun HomeScreen(db: MettleDatabase, onRecord: () -> Unit, onProgress: () -> Unit,
     val totals by db.activities().totals(from, to).collectAsState(PeriodTotals(0, 0, 0.0, 0, 0))
     val week by db.activities().between(from, to).collectAsState(emptyList())
     val recent by db.activities().recent().collectAsState(emptyList())
+    val group by androidx.compose.runtime.produceState(emptyList<FeedItem>()) { value = loadGroupFeed() }
 
     Column(Modifier.fillMaxSize().background(MettleColors.Band)) {
         TopBar("METTLE", wordmark = true) {
@@ -88,6 +89,10 @@ fun HomeScreen(db: MettleDatabase, onRecord: () -> Unit, onProgress: () -> Unit,
             item { ReadinessCard(onHealth) }
             item { TodayCard(db, trackingOn, onSetup, onReplay) }
             item { WeekCard(totals, week, weekStart, zone, onProgress) }
+            if (group.isNotEmpty()) {
+                item { Text("Your group", style = androidx.compose.material3.MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 16.dp, top = 8.dp)) }
+                items(group, key = { "g" + it.id }) { GroupFeedCard(it) }
+            }
             if (recent.isEmpty()) {
                 item { EmptyFeed(onRecord) }
             } else {

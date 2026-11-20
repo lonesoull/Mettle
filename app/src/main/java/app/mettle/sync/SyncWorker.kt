@@ -107,6 +107,7 @@ private data class ActivityRow(
     @SerialName("route_public") val routePublic: String?,
     @SerialName("streams_path") val streamsPath: String?,
     val device: String?,
+    val source: String,
     @SerialName("deleted_at") val deletedAt: String?,
     @SerialName("place_id") val placeId: String?,
     @SerialName("avg_hr") val avgHr: Int?,
@@ -250,7 +251,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                         a.id, userId, a.type.name.lowercase(), a.subType.name.lowercase(), a.title, a.description,
                         Instant.ofEpochMilli(a.startedAt).toString(), a.timezone, a.elapsedS, a.movingS, a.distanceM,
                         a.elevGainM, a.elevLossM, a.floorsUp, a.floorsDown, a.avgPaceSKm, a.gapSKm, a.avgCadenceSpm, a.calories,
-                        a.rpe, a.trainingLoad, a.visibility.name.lowercase(), lineString(route), lineString(public), streamsPath, a.device,
+                        a.rpe, a.trainingLoad, a.visibility.name.lowercase(), lineString(route), lineString(public), streamsPath, a.device, a.source,
                         a.deletedAt?.let { Instant.ofEpochMilli(it).toString() }, a.placeId, a.avgHr, a.maxHr,
                     ),
                 ) { onConflict = "id" }

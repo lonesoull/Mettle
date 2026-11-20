@@ -149,6 +149,32 @@ object WorkoutSaver {
         return id
     }
 
+    /** Saves a workout from an imported file (GPX). */
+    suspend fun saveImported(context: Context, samples: List<Sample>, type: ActivityType, title: String): String {
+        val db = (context.applicationContext as MettleApplication).database
+        val r = WorkoutMath.analyse(samples)
+        val id = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+        val startedAt = samples.minOf { it.tMs }
+        GZIPOutputStream(streamsFile(context, id).outputStream()).bufferedWriter().use {
+            it.write(json.encodeToString(Streams.serializer(), Streams(1, r.t, r.lat, r.lon, r.dist, r.alt, r.moving)))
+        }
+        val keep = WorkoutMath.simplify(r.lat, r.lon)
+        db.activities().upsert(ActivityEntity(
+            id = id, userId = null, type = type, title = title, startedAt = startedAt, timezone = ZoneId.systemDefault().id,
+            elapsedS = r.elapsedS, movingS = r.movingS, distanceM = r.distanceM, elevGainM = r.elevGainM, elevLossM = r.elevLossM,
+            avgPaceSKm = r.avgPaceSKm, gapSKm = r.gapSKm, routePolyline = Polyline.encode(keep.map { r.lat[it] to r.lon[it] }),
+            streamsFile = streamsFile(context, id).name, source = "gpx_import", visibility = Visibility.PRIVATE,
+            createdAt = now, updatedAt = now, syncState = SyncState.DIRTY,
+        ))
+        db.laps().upsertAll(r.splits.map { s -> LapEntity(UUID.randomUUID().toString(), id, s.index, LapKind.AUTO_KM, 0, 0, s.distanceM, s.movingS, s.elevChangeM) })
+        db.bestEfforts().upsertAll(r.efforts.map { e ->
+            val previous = db.bestEfforts().best(e.name)
+            BestEffortEntity(UUID.randomUUID().toString(), id, e.name, e.timeS, e.startOffsetS, e.endOffsetS, if (previous == null || e.timeS < previous) 1 else null, startedAt)
+        })
+        return id
+    }
+
     suspend fun discard(context: Context, sessionId: String) {
         (context.applicationContext as MettleApplication).database.recording().clear(sessionId)
         WorkoutService.clearSession(context)
