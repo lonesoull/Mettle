@@ -40,6 +40,12 @@ Two copies of the same data model:
 | `stays` | place someone stayed | where, from–to, height/floor, label (Home, Office…) — the readable location timeline |
 | `devices` | paired heart-rate strap / Health Connect source | what it provides (heart rate, sleep); HR and sleep screens stay hidden until one exists |
 | `sleep_sessions` | night of sleep from a connected device | asleep/deep/light/REM/awake minutes, resting HR |
+| `member_status` | member | live last position, floor, activity, battery, tracking OK/problem — powers the admin live map |
+| `tracking_gaps` | gap in tracking | start, end, reason (phone off, battery saver, location off, …) |
+| `emergency_contacts` | contact | name, phone, SMS on fall/SOS |
+| `geofence_rules` | arrive/leave rule | who is notified, whose movement, which place |
+| `alerts` | fall / SOS / no-movement / arrive / leave event | location, floor, status, who acknowledged |
+| `hr_spot_checks` | fingertip heart-rate check | bpm, quality, context |
 | `sensor_lab_recordings` | labelled raw sensor recording | used to tune stair detection on phones without a barometer |
 
 Phone-only table: `recording_samples` — a crash-safe buffer written every second during a workout, compacted into the streams file when you press Save.
@@ -57,7 +63,7 @@ Phone-only table: `recording_samples` — a crash-safe buffer written every seco
 
 ## Setting up the server (done once, when we reach release 3)
 1. Create a free Supabase project.
-2. In its SQL editor run, in order: `20261119000000_init.sql`, `20261120000000_all_day_and_admin.sql`, `20261121000000_space_time_and_devices.sql`.
+2. In its SQL editor run, in order: `20261119000000_init.sql`, `20261120000000_all_day_and_admin.sql`, `20261121000000_space_time_and_devices.sql`, `20261122000000_safety_health_extras.sql`.
 3. After your first login, make yourself admin with the one-line `update profiles …` at the bottom of the second script.
 4. Authentication → turn **off** "Allow new users to sign up"; invite each member by email.
 

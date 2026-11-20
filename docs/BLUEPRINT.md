@@ -34,16 +34,41 @@ Personal training tracker for running, walking, hiking and stairs. Android only,
 - Heart rate (BLE strap/watch) and sleep (Health Connect) only appear when a device is connected.
 - Group admin reads all members' data; members see only their own. No in-app consent screen (closed group).
 
-## Release plan
-**v1**
-1. Run/walk/hike recording: foreground service, GPS filtering, auto-pause, map
-2. Stairs mode + Sensor Lab
-3. Logins + sync (Supabase)
-4. Strava import, best efforts, shoes, goals, tags, GPX/CSV/SQLite export, privacy zones, offline voice coach, in-app updater
+## Extras (decided 2026-11-21)
+1. Day replay — scrub through a day on the map: place, height/floor and activity change as it plays.
+2. Sitting vs standing — from thigh angle with the phone in a trouser pocket; standing hours, long-sitting nudges.
+3. Lift vs stairs (barometer phones) — "stairs 7 of 9 times today".
+4. Auto-learned places — Home / Work / Gym from stays; per-building floor heights remembered.
+5. Walking-health trends — walking speed, cadence and step regularity over weeks.
+6. Daily records — most steps, most floors, longest walk in a day; streaks.
+7. Admin dashboard — live group map (last position, floor, activity, battery), today's stats, tracking health, weekly group report.
+9. Arrive/leave alerts — low-power geofences; the admin may watch anyone, members only themselves.
+10. Fall detection — impact then stillness → 30 s countdown → alert admin + SMS to emergency contacts with location.
+11. SOS button; no-movement-for-X-hours alert — off by default, each person opts in and sets hours and active window.
+12. Fingertip heart-rate check — camera + flash, 30 s spot check.
+13. Morning readiness — resting HR + sleep (if device) + recent training load → 0–100.
+14. Tracking-health report — gaps shown with reason (phone off, battery saver, location off, permission removed, app stopped).
 
-**v2** — GAP, histograms, fitness/fatigue/form (session RPE), downhill stress score, matched routes, personal segments + ghost pacer, heatmap, heat-adjusted pace, missed-check-in safety alert, small-group segment leaderboards
+Not included: group challenges.
 
-**v3** — route builder, live beacon, 3D terrain, BLE heart rate, FIT export
+## Not possible / limited (agreed)
+- Room-level indoor position — building + floor only.
+- Accurate floors and lift detection without a barometer — motion-based estimate instead.
+- Heart rate, HRV, SpO2, blood pressure, skin temperature from the phone alone — need a strap/watch (except the fingertip spot check).
+- Sleep stages without a wearable — sleep hidden unless a device is connected.
+- Data when the phone is off, left behind, or carried by someone else — shown as gaps.
+- Exact calories without heart rate — estimate.
+- Second-by-second GPS all day — adaptive tracking instead.
+
+## Release plan (revised 2026-11-21)
+1. **Backend + login + sync** — Supabase, admin role, member invites.
+2. **All-day tracking** — activity states (incl. sitting/standing), steps, distance, active minutes, space-time track and stays, day replay, tracking-health report, admin live map.
+3. **Stairs & places** — Sensor Lab, stair up/down + lift detection, auto-learned places, walking-health trends, daily records.
+4. **Safety** — fall detection, SOS, opt-in no-movement alert, arrive/leave alerts, emergency contacts, push notifications.
+5. **Workouts** — GPS run/walk/hike with auto-start on runs, stair workouts, activity detail analytics (GAP, splits, best efforts, matched routes), voice coach.
+6. **Health** — fingertip heart-rate check, morning readiness, Bluetooth heart-rate straps, Health Connect sleep.
+7. **Polish** — feed, kudos/comments, segments, heatmap, exports, Strava import.
+8. **iOS** — last.
 
 ## Screens (prototype)
 Home · Choose mode · Live run · Live stairs · Save workout · Activity detail · Progress
