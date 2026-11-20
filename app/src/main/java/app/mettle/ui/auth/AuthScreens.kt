@@ -98,7 +98,7 @@ fun SignInScreen() {
         Text(if (!codeSent) "Sign in" else "Check your email", style = MaterialTheme.typography.headlineLarge)
         Text(
             if (!codeSent) "Mettle is invite-only. Enter the email your group admin invited."
-            else "We sent a 6-digit code to $email. It may take a minute to arrive.",
+            else "We sent a sign-in code to $email. It may take a minute to arrive, and it works for 10 minutes.",
             style = MaterialTheme.typography.bodyLarge, color = MettleColors.Ink2,
         )
         if (!codeSent) {
@@ -117,11 +117,11 @@ fun SignInScreen() {
             }
         } else {
             OutlinedTextField(
-                value = code, onValueChange = { v -> code = v.filter(Char::isDigit).take(6); error = null },
-                label = { Text("6-digit code") }, singleLine = true,
+                value = code, onValueChange = { v -> code = v.filter(Char::isDigit).take(10); error = null },
+                label = { Text("Code from the email") }, singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), colors = fieldColors, modifier = Modifier.fillMaxWidth(),
             )
-            PrimaryButton("Sign in", enabled = code.length == 6, busy = busy) {
+            PrimaryButton("Sign in", enabled = code.length in 6..10, busy = busy) {
                 busy = true; error = null
                 scope.launch {
                     runCatching { Backend.verifyCode(email, code) }.onFailure { error = friendly(it) }
