@@ -72,6 +72,8 @@ class TrackingService : Service(), SensorEventListener {
     private val db get() = (application as MettleApplication).database
     private val prefs get() = getSharedPreferences("tracking", MODE_PRIVATE)
     private val altBuffer = ArrayDeque<Pair<Long, Double>>()   // last few minutes of barometric height
+    private val fallDetector = app.mettle.safety.FallDetector()
+    private var fallRegistered = false
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
@@ -118,6 +120,7 @@ class TrackingService : Service(), SensorEventListener {
     override fun onDestroy() {
         TrackingState.running = false
         sensors.unregisterListener(this)
+        sensors.unregisterListener(fallListener); fallRegistered = false
         runCatching { LocationServices.getFusedLocationProviderClient(this).removeLocationUpdates(locationCallback) }
         runCatching { ActivityRecognition.getClient(this).removeActivityUpdates(activityPendingIntent()) }
         scope.cancel()
@@ -170,6 +173,25 @@ class TrackingService : Service(), SensorEventListener {
         }
         sensors.getDefaultSensor(Sensor.TYPE_PRESSURE)?.let {
             sensors.registerListener(this, it, 1_000_000, fiveMinutesUs)   // 1 Hz, batched
+        }
+        updateFallDetection()
+    }
+
+    /** Fall detection: accelerometer at 25 Hz, delivered in 10-second batches so the CPU mostly sleeps. */
+    private fun updateFallDetection() {
+        val want = app.mettle.safety.SafetyPrefs.fallDetection(this)
+        val accel = sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) ?: return
+        if (want && !fallRegistered) { sensors.registerListener(fallListener, accel, 40_000, 10_000_000); fallRegistered = true }
+        if (!want && fallRegistered) { sensors.unregisterListener(fallListener); fallRegistered = false }
+    }
+
+    private val fallListener = object : SensorEventListener {
+        override fun onAccuracyChanged(s: Sensor?, a: Int) = Unit
+        override fun onSensorChanged(e: SensorEvent) {
+            val t = e.timestamp / 1_000_000
+            if (fallDetector.add(t, e.values[0], e.values[1], e.values[2])) {
+                app.mettle.safety.SafetyState.startCountdown(this@TrackingService, "fall")
+            }
         }
     }
 
@@ -261,6 +283,9 @@ class TrackingService : Service(), SensorEventListener {
                 }
             }
             prefs.edit().putLong(KEY_HEARTBEAT, System.currentTimeMillis()).apply()
+            updateFallDetection()
+            checkNoMovement(day, minute)
+            if (minute % 1 == 0) runCatching { app.mettle.safety.AdminAlerts.poll(this@TrackingService) }
             if (minute % 5 == 0) {
                 val steps = db.day().minutesNow(day).sumOf { it.steps }
                 getSystemService(NotificationManager::class.java)
@@ -331,6 +356,25 @@ class TrackingService : Service(), SensorEventListener {
         runCatching {
             client.removeLocationUpdates(locationCallback)
             client.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
+        }
+    }
+
+    /** Opt-in: no steps for the chosen number of hours inside the chosen window → "Are you OK?" then alert. */
+    private suspend fun checkNoMovement(day: String, minute: Int) {
+        val c = this
+        if (!app.mettle.safety.SafetyPrefs.noMovement(c)) return
+        val now = java.time.LocalTime.now(zone)
+        val from = app.mettle.safety.SafetyPrefs.noMovementFrom(c); val to = app.mettle.safety.SafetyPrefs.noMovementTo(c)
+        if (now.isBefore(from) || now.isAfter(to)) return
+        val hours = app.mettle.safety.SafetyPrefs.noMovementHours(c)
+        if (System.currentTimeMillis() - app.mettle.safety.SafetyPrefs.lastNoMovementAlert < hours * 3_600_000L) return
+        val windowStart = minute - hours * 60
+        if (windowStart < from.hour * 60 + from.minute) return          // only count time inside today's window
+        val minutes = db.day().minutesNow(day).filter { it.minute in windowStart until minute }
+        if (minutes.size < hours * 60 * 0.9) return                     // tracking had gaps: don't guess
+        if (minutes.sumOf { it.steps } < 20) {
+            app.mettle.safety.SafetyPrefs.lastNoMovementAlert = System.currentTimeMillis()
+            app.mettle.safety.SafetyState.startCountdown(this, "no_movement", seconds = 300)
         }
     }
 

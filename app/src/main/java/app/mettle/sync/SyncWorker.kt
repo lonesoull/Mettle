@@ -160,6 +160,10 @@ data class DayTrackFile(val v: Int = 1, val t: List<Long>, val lat: List<Double>
                         val hpa: List<Float?>, val state: List<String>)
 
 @Serializable
+private data class LearnedPlaceRow(val id: String, @SerialName("user_id") val userId: String, val name: String, val kind: String,
+                                   val location: String, @SerialName("radius_m") val radiusM: Int = 120, @SerialName("auto_learned") val autoLearned: Boolean = true)
+
+@Serializable
 private data class CapabilitiesRow(@SerialName("phone_capabilities") val capabilities: JsonObject)
 
 /**
@@ -297,8 +301,14 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             if (System.currentTimeMillis() - prefs.getLong("places_learned_at", 0L) > 24 * 3_600_000L) {
                 val since = LocalDate.now(zone).minusDays(21).atStartOfDay(zone).toInstant().toEpochMilli()
                 val history = db.track().between(since, System.currentTimeMillis())
-                app.mettle.space.Places.save(applicationContext, app.mettle.space.StayMath.learnPlaces(
-                    app.mettle.space.StayMath.stays(history.map { app.mettle.space.TrackPt(it.tMs, it.lat, it.lon, it.accuracyM, it.altitudeM) }), zone))
+                val learned = app.mettle.space.StayMath.learnPlaces(
+                    app.mettle.space.StayMath.stays(history.map { app.mettle.space.TrackPt(it.tMs, it.lat, it.lon, it.accuracyM, it.altitudeM) }), zone)
+                app.mettle.space.Places.save(applicationContext, learned)
+                // Share learned Home/Work with the server so arrive/leave alerts can use them.
+                if (learned.isNotEmpty()) Backend.client.from("places").upsert(learned.map { k ->
+                    LearnedPlaceRow(UUID.nameUUIDFromBytes("$userId/place/${k.label}".toByteArray()).toString(), userId, k.label,
+                        k.label.lowercase(), "SRID=4326;POINT(${k.lon} ${k.lat})")
+                }) { onConflict = "id" }
                 prefs.edit().putLong("places_learned_at", System.currentTimeMillis()).apply()
             }
 
@@ -313,6 +323,10 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                 }) { onConflict = "id" }
                 tPrefs.edit().putString(TrackingService.KEY_GAPS, "[]").apply()
             }
+
+            // Arrive/leave rules that watch this person.
+            runCatching { app.mettle.safety.Geofences.refresh(applicationContext, userId) }
+            app.mettle.safety.AlertUploadWorker.enqueue(applicationContext)
 
             // Live status for the admin map.
             val last = db.track().latest()
@@ -388,6 +402,8 @@ object ProfileCache {
             ?.let { runCatching { json.decodeFromString(app.mettle.data.remote.Profile.serializer(), it) }.getOrNull() }
             ?.takeIf { it.id == userId }
     fun clear(context: Context) = context.getSharedPreferences("profile", Context.MODE_PRIVATE).edit().remove("json").apply()
+    fun isAdmin(context: Context): Boolean = context.getSharedPreferences("profile", Context.MODE_PRIVATE).getString("json", null)
+        ?.let { runCatching { json.decodeFromString(app.mettle.data.remote.Profile.serializer(), it).isAdmin }.getOrNull() } ?: false
 
     fun save(context: Context, heightCm: Int?, weightKg: Double?, stepGoal: Int) {
         context.getSharedPreferences("profile", Context.MODE_PRIVATE).edit()

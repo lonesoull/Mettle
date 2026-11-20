@@ -51,6 +51,8 @@ import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.rememberCameraPositionState
 import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.auth.auth
+import kotlinx.coroutines.launch
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.storage.storage
 import kotlinx.coroutines.Dispatchers
@@ -89,6 +91,7 @@ import java.util.zip.GZIPInputStream
     @SerialName("distance_m") val distanceM: Int = 0, @SerialName("moving_s") val movingS: Int = 0, @SerialName("floors_up") val floorsUp: Int = 0,
 )
 @Serializable data class MemberGap(@SerialName("start_at") val startAt: String, @SerialName("end_at") val endAt: String? = null, val reason: String)
+@Serializable data class AckRow(val status: String = "acknowledged", @SerialName("acknowledged_at") val at: String = Instant.now().toString())
 @Serializable data class MemberStay(val label: String? = null, val lat: Double, val lon: Double)
 
 private val json = Json { ignoreUnknownKeys = true }
@@ -108,9 +111,15 @@ fun AdminScreen(onMember: (String, String) -> Unit, onBack: () -> Unit) {
     var live by remember { mutableStateOf<List<MemberLive>>(emptyList()) }
     var today by remember { mutableStateOf<List<MemberDay>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(Unit) {
+    var alerts by remember { mutableStateOf<List<app.mettle.safety.AlertView>>(emptyList()) }
+    var refresh by remember { mutableStateOf(0) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    LaunchedEffect(refresh) {
         while (true) {
             runCatching {
+                alerts = Backend.client.from("alerts_live").select {
+                    filter { gt("created_at", Instant.now().minus(Duration.ofDays(2)).toString()) }; order("created_at", Order.DESCENDING); limit(20)
+                }.decodeList()
                 members = Backend.client.from("profiles").select().decodeList()
                 live = Backend.client.from("member_live").select().decodeList()
                 val d = LocalDate.now(ZoneId.systemDefault()).toString()
@@ -139,6 +148,27 @@ fun AdminScreen(onMember: (String, String) -> Unit, onBack: () -> Unit) {
                     }
                 }
                 error?.let { Text(it, style = MettleType.Label, color = MettleColors.WarnText, modifier = Modifier.padding(12.dp)) }
+            }
+        }
+        if (alerts.isNotEmpty()) item {
+            Section {
+                Text("Alerts · last 2 days", style = MaterialTheme.typography.titleLarge)
+                alerts.forEach { a ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("${a.name ?: "Member"} · " + when (a.kind) { "fall" -> "possible fall"; "sos" -> "SOS"; "no_movement" -> "no movement"
+                                "arrive" -> "arrived"; "leave" -> "left"; else -> a.kind } + (a.detail?.get("place")?.jsonPrimitive?.content?.let { " $it" } ?: ""),
+                                style = MaterialTheme.typography.titleSmall, color = if (a.kind in setOf("fall", "sos", "no_movement")) MettleColors.WarnText else MettleColors.Ink)
+                            Text(ago(a.createdAt) + if (a.status == "acknowledged") " · handled" else "", style = MettleType.Label, color = MettleColors.Sub)
+                        }
+                        if (a.status != "acknowledged" && a.kind in setOf("fall", "sos", "no_movement")) TextButton(onClick = {
+                            scope.launch {
+                                runCatching { Backend.client.from("alerts").update(AckRow()) { filter { eq("id", a.id) } } }
+                                refresh++
+                            }
+                        }) { Text("Handled", color = MettleColors.Orange) }
+                    }
+                }
             }
         }
         items(members, key = { it.id }) { p ->
@@ -216,6 +246,7 @@ fun MemberScreen(userId: String, name: String, onReplay: () -> Unit, onBack: () 
                 }
             }
         }
+        item { ArriveLeaveRules(userId, name) }
         live?.capabilities?.let { caps ->
             item {
                 Section {
@@ -243,3 +274,46 @@ suspend fun loadMemberPlaces(userId: String): List<KnownPlace> = runCatching {
     Backend.client.from("stays_live").select { filter { eq("user_id", userId); neq("label", "null") }; limit(50) }.decodeList<MemberStay>()
         .filter { it.label != null }.distinctBy { it.label }.map { KnownPlace(it.label!!, it.lat, it.lon) }
 }.getOrDefault(emptyList())
+
+/** Admin: "tell me when this member arrives at / leaves" one of their places. */
+@Composable
+private fun ArriveLeaveRules(userId: String, name: String) {
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var version by remember { mutableStateOf(0) }
+    val data by produceState<Pair<List<app.mettle.safety.PlaceView>, List<app.mettle.safety.GeofenceRule>>?>(null, userId, version) {
+        value = runCatching {
+            val me = Backend.client.auth.currentUserOrNull()?.id
+            val places = Backend.client.from("places_live").select { filter { eq("user_id", userId) } }.decodeList<app.mettle.safety.PlaceView>()
+            val rules = Backend.client.from("geofence_rules").select { filter { eq("subject_id", userId); eq("owner_id", me ?: "") } }.decodeList<app.mettle.safety.GeofenceRule>()
+            places.filter { it.lat != null } to rules
+        }.getOrNull()
+    }
+    Section {
+        Text("Arrive / leave alerts", style = MaterialTheme.typography.titleLarge)
+        val (places, rules) = data ?: (emptyList<app.mettle.safety.PlaceView>() to emptyList())
+        if (places.isEmpty()) Text("$name has no known places yet (Home and Work are learned after a few days of tracking).",
+            style = MaterialTheme.typography.bodyMedium, color = MettleColors.Sub)
+        places.forEach { p ->
+            val rule = rules.firstOrNull { it.placeId == p.id }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(p.name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                listOf("Arrive" to true, "Leave" to false).forEach { (label, arrive) ->
+                    val on = rule != null && (if (arrive) rule.onArrive else rule.onLeave)
+                    TextButton(onClick = {
+                        scope.launch {
+                            runCatching {
+                                val me = Backend.client.auth.currentUserOrNull()!!.id
+                                val newArrive = if (arrive) !on else rule?.onArrive ?: false
+                                val newLeave = if (!arrive) !on else rule?.onLeave ?: false
+                                val r = app.mettle.safety.GeofenceRule(rule?.id ?: java.util.UUID.randomUUID().toString(), me, userId, p.id, newArrive, newLeave, newArrive || newLeave)
+                                Backend.client.from("geofence_rules").upsert(r) { onConflict = "id" }
+                            }
+                            version++
+                        }
+                    }) { Text((if (on) "✓ " else "") + label, color = if (on) MettleColors.Good else MettleColors.Orange) }
+                }
+            }
+        }
+        Text("Alerts reach you within about a minute while Mettle's tracking runs on your phone.", style = MettleType.Label, color = MettleColors.Sub)
+    }
+}

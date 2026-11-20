@@ -61,7 +61,7 @@ private const val DEFAULT_KM_GOAL = 25_000L
 private const val DEFAULT_FLOORS_GOAL = 200L
 
 @Composable
-fun HomeScreen(db: MettleDatabase, onRecord: () -> Unit, onProgress: () -> Unit, onSetup: () -> Unit, onReplay: () -> Unit, onOpen: (String) -> Unit, onResumeSave: () -> Unit) {
+fun HomeScreen(db: MettleDatabase, onRecord: () -> Unit, onProgress: () -> Unit, onSetup: () -> Unit, onReplay: () -> Unit, onSafety: () -> Unit, onOpen: (String) -> Unit, onResumeSave: () -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     var trackingOn by remember { androidx.compose.runtime.mutableStateOf(false) }
     androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
@@ -77,7 +77,9 @@ fun HomeScreen(db: MettleDatabase, onRecord: () -> Unit, onProgress: () -> Unit,
     val recent by db.activities().recent().collectAsState(emptyList())
 
     Column(Modifier.fillMaxSize().background(MettleColors.Band)) {
-        TopBar("METTLE", wordmark = true)
+        TopBar("METTLE", wordmark = true) {
+            androidx.compose.material3.TextButton(onClick = onSafety) { Text("Safety · SOS", color = androidx.compose.ui.graphics.Color(0xFFDC2626)) }
+        }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
             item { Spacer(Modifier.height(0.dp)) }
             val live = app.mettle.workout.WorkoutService.live.value
