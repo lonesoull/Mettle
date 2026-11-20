@@ -18,6 +18,11 @@ data class DaySummary(
     val cyclingMin: Int,
     val activeCalories: Int,
     val trackedMin: Int,
+    val sittingMin: Int = 0,
+    val standingMin: Int = 0,
+    val floorsUp: Int = 0,
+    val floorsDown: Int = 0,
+    val liftTrips: Int = 0,
 )
 
 data class Segment(val startMinute: Int, val endMinute: Int, val state: DayState, val steps: Int)
@@ -41,7 +46,7 @@ object DayMath {
     fun resolve(sensorState: DayState, steps: Int): DayState = when {
         steps >= RUN_CADENCE -> DayState.RUNNING
         steps >= 30 -> if (sensorState == DayState.RUNNING) DayState.RUNNING else DayState.WALKING
-        steps >= 10 && sensorState in setOf(DayState.STILL, DayState.UNKNOWN) -> DayState.WALKING
+        steps >= 10 && sensorState in setOf(DayState.STILL, DayState.SITTING, DayState.STANDING, DayState.UNKNOWN) -> DayState.WALKING
         else -> sensorState
     }
 
@@ -64,7 +69,12 @@ object DayMath {
             activeMin = active,
             walkingMin = count[DayState.WALKING] ?: 0,
             runningMin = count[DayState.RUNNING] ?: 0,
-            stillMin = count[DayState.STILL] ?: 0,
+            stillMin = (count[DayState.STILL] ?: 0) + (count[DayState.SITTING] ?: 0) + (count[DayState.STANDING] ?: 0),
+            sittingMin = count[DayState.SITTING] ?: 0,
+            standingMin = count[DayState.STANDING] ?: 0,
+            floorsUp = minutes.sumOf { it.floorsUp },
+            floorsDown = minutes.sumOf { it.floorsDown },
+            liftTrips = minutes.sumOf { it.liftTrips },
             vehicleMin = count[DayState.VEHICLE] ?: 0,
             cyclingMin = count[DayState.CYCLING] ?: 0,
             activeCalories = calories.roundToInt(),

@@ -52,6 +52,7 @@ object WorkoutSaver {
     suspend fun save(context: Context, sessionId: String, type: ActivityType, startedAt: Long, details: SaveDetails): String {
         val db = (context.applicationContext as MettleApplication).database
         val raw = db.recording().samples(sessionId)
+        if (type == ActivityType.STAIRS) return saveStairs(context, sessionId, startedAt, details, raw)
         val samples = raw.filter { !it.paused }.map { Sample(it.tMs, it.lat, it.lon, it.accuracyM, it.altitudeM, it.pressureHpa, it.steps) }
         val r = WorkoutMath.analyse(samples)
         val id = UUID.randomUUID().toString()
@@ -88,6 +89,56 @@ object WorkoutSaver {
                 rankAtTime = if (previous == null || e.timeS < previous) 1 else null, achievedAt = startedAt)
         }
         db.bestEfforts().upsertAll(efforts)
+        db.recording().clear(sessionId)
+        WorkoutService.clearSession(context)
+        SyncWorker.schedule(context)
+        return id
+    }
+
+    private suspend fun saveStairs(context: Context, sessionId: String, startedAt: Long, details: SaveDetails,
+                                   raw: List<app.mettle.data.db.RecordingSampleEntity>): String {
+        val db = (context.applicationContext as MettleApplication).database
+        val prefs = context.getSharedPreferences("workout", Context.MODE_PRIVATE)
+        val machine = prefs.getBoolean("machine", false)
+        val place = prefs.getString("place", null)?.let { db.places().get(it) }
+        val spf = place?.stepsPerFloor ?: if (machine) 16 else 22
+        val fh = place?.floorHeightM ?: 3.0
+        val live = raw.filter { !it.paused }
+        val steps = ArrayList<Long>(); var prev = 0
+        for (r in live) { val c = r.steps ?: prev; repeat((c - prev).coerceIn(0, 50)) { steps += r.tMs }; prev = maxOf(prev, c) }
+        val alt = live.mapNotNull { r -> r.pressureHpa?.let { r.tMs to WorkoutMath.pressureAltitudeM(it) } }
+        val laps = live.filter { it.lap }.map { it.tMs }
+        val r = app.mettle.stairs.StairMath.analyse(steps, alt.takeIf { it.size > 3 }, spf, fh, laps, machine)
+        val id = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+        val end = raw.lastOrNull()?.tMs ?: now
+        val elapsed = ((end - startedAt) / 1000).toInt()
+        val active = r.bouts.sumOf { ((it.endMs - it.startMs) / 1000).toInt() }
+        val body = ProfileCache.body(context)
+        db.activities().upsert(
+            ActivityEntity(
+                id = id, userId = null, type = ActivityType.STAIRS,
+                subType = if (machine) ActivitySub.STAIR_MACHINE else ActivitySub.STAIRWELL,
+                title = details.title.ifBlank { defaultTitle(ActivityType.STAIRS, startedAt) }, description = details.description?.ifBlank { null },
+                startedAt = startedAt, timezone = ZoneId.systemDefault().id, elapsedS = elapsed, movingS = active,
+                elevGainM = r.floorsUp * fh, elevLossM = r.floorsDown * fh, floorsUp = r.floorsUp, floorsDown = r.floorsDown,
+                // Climbing ≈ 1.1 kcal per kg per 100 m up; descending about a third of that.
+                calories = (body.weightKg * (r.floorsUp * fh * 0.011 + r.floorsDown * fh * 0.004)).roundToInt(),
+                rpe = details.rpe, trainingLoad = details.rpe?.let { it * elapsed / 60 },
+                placeId = place?.id, visibility = details.visibility, device = android.os.Build.MODEL,
+                createdAt = now, updatedAt = now, syncState = SyncState.DIRTY,
+            ),
+        )
+        db.laps().upsertAll(r.sets.map { st ->
+            LapEntity(UUID.randomUUID().toString(), id, st.index, LapKind.STAIR_SET, ((st.startMs - startedAt) / 1000).toInt(),
+                ((st.endMs - startedAt) / 1000).toInt(), floorsUp = st.floorsUp, floorsDown = st.floorsDown,
+                climbS = st.climbS, descentS = st.descentS, restS = st.restS, movingS = st.climbS + st.descentS)
+        })
+        db.bestEfforts().upsertAll(r.efforts.map { e ->
+            val previous = db.bestEfforts().best(e.name)
+            BestEffortEntity(UUID.randomUUID().toString(), id, e.name, e.timeS, ((e.startMs - startedAt) / 1000).toInt(),
+                ((e.endMs - startedAt) / 1000).toInt(), if (previous == null || e.timeS < previous) 1 else null, startedAt)
+        })
         db.recording().clear(sessionId)
         WorkoutService.clearSession(context)
         SyncWorker.schedule(context)

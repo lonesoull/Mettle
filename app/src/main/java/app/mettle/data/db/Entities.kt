@@ -199,10 +199,11 @@ data class RecordingSampleEntity(
     val steps: Int?,                     // cumulative step count
     val paused: Boolean,
     val pressureHpa: Float? = null,
+    @androidx.room.ColumnInfo(defaultValue = "0") val lap: Boolean = false,
 )
 
 /** All-day tracking: what happened in each minute of the day (local only, summarised for the server). */
-enum class DayState { STILL, WALKING, RUNNING, VEHICLE, CYCLING, UNKNOWN }
+enum class DayState { STILL, SITTING, STANDING, WALKING, RUNNING, VEHICLE, CYCLING, UNKNOWN }
 
 @Entity(tableName = "day_minutes", primaryKeys = ["day", "minute"])
 data class DayMinuteEntity(
@@ -211,6 +212,9 @@ data class DayMinuteEntity(
     val steps: Int,
     val state: DayState,
     val updatedAt: Long,
+    @androidx.room.ColumnInfo(defaultValue = "0") val floorsUp: Int = 0,
+    @androidx.room.ColumnInfo(defaultValue = "0") val floorsDown: Int = 0,
+    @androidx.room.ColumnInfo(defaultValue = "0") val liftTrips: Int = 0,
 )
 
 /** All-day position samples (local; uploaded later as one compressed file per day). */

@@ -48,6 +48,11 @@ private data class DailySummaryRow(
     @SerialName("vehicle_min") val vehicleMin: Int,
     @SerialName("active_calories") val activeCalories: Int,
     @SerialName("tracked_min") val trackedMin: Int,
+    @SerialName("sitting_min") val sittingMin: Int,
+    @SerialName("standing_min") val standingMin: Int,
+    @SerialName("floors_up") val floorsUp: Int,
+    @SerialName("floors_down") val floorsDown: Int,
+    @SerialName("lift_trips") val liftTrips: Int,
 )
 
 @Serializable
@@ -103,6 +108,7 @@ private data class ActivityRow(
     @SerialName("streams_path") val streamsPath: String?,
     val device: String?,
     @SerialName("deleted_at") val deletedAt: String?,
+    @SerialName("place_id") val placeId: String?,
 )
 
 @Serializable
@@ -123,6 +129,13 @@ private data class EffortRow(
 
 private fun lineString(points: List<Pair<Double, Double>>): String? =
     if (points.size < 2) null else "SRID=4326;LINESTRING(" + points.joinToString(",") { "${it.second} ${it.first}" } + ")"
+
+@Serializable
+private data class PlaceRow(
+    val id: String, @SerialName("user_id") val userId: String, val name: String,
+    @SerialName("floor_height_m") val floorHeightM: Double, @SerialName("steps_per_floor") val stepsPerFloor: Int?,
+    @SerialName("calibrated_at") val calibratedAt: String?, val kind: String = "building",
+)
 
 @Serializable
 private data class CapabilitiesRow(@SerialName("phone_capabilities") val capabilities: JsonObject)
@@ -152,7 +165,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                 val s = DayMath.summary(minutes, body)
                 Backend.client.from("daily_summaries").upsert(
                     DailySummaryRow(userId, day, zone.id, s.steps, s.distanceM, s.activeMin, s.walkingMin, s.runningMin,
-                        s.stillMin, s.vehicleMin, s.activeCalories, s.trackedMin),
+                        s.stillMin, s.vehicleMin, s.activeCalories, s.trackedMin, s.sittingMin, s.standingMin, s.floorsUp, s.floorsDown, s.liftTrips),
                 ) { onConflict = "user_id,day" }
 
                 // Replace that day's timeline with the freshly computed one.
@@ -179,6 +192,13 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             }
             prefs.edit().putLong("days_synced_at", startedAt).apply()
 
+            // Buildings (before workouts, which point at them).
+            for (p in db.places().dirty()) {
+                Backend.client.from("places").upsert(PlaceRow(p.id, userId, p.name, p.floorHeightM, p.stepsPerFloor,
+                    p.calibratedAt?.let { Instant.ofEpochMilli(it).toString() })) { onConflict = "id" }
+                db.places().markSynced(p.id, p.updatedAt)
+            }
+
             // Finished workouts.
             for (a in db.activities().dirty()) {
                 val streams = app.mettle.workout.WorkoutSaver.readStreams(applicationContext, a.id)
@@ -203,7 +223,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                         Instant.ofEpochMilli(a.startedAt).toString(), a.timezone, a.elapsedS, a.movingS, a.distanceM,
                         a.elevGainM, a.elevLossM, a.floorsUp, a.floorsDown, a.avgPaceSKm, a.gapSKm, a.avgCadenceSpm, a.calories,
                         a.rpe, a.trainingLoad, a.visibility.name.lowercase(), lineString(route), lineString(public), streamsPath, a.device,
-                        a.deletedAt?.let { Instant.ofEpochMilli(it).toString() },
+                        a.deletedAt?.let { Instant.ofEpochMilli(it).toString() }, a.placeId,
                     ),
                 ) { onConflict = "id" }
                 val laps = db.laps().forActivityNow(a.id)
@@ -275,7 +295,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
 }
 
 private fun DayState.toServer() = when (this) {
-    DayState.STILL -> "still"; DayState.WALKING -> "walking"; DayState.RUNNING -> "running"
+    DayState.STILL -> "still"; DayState.SITTING -> "sitting"; DayState.STANDING -> "standing"; DayState.WALKING -> "walking"; DayState.RUNNING -> "running"
     DayState.VEHICLE -> "vehicle"; DayState.CYCLING -> "cycling"; DayState.UNKNOWN -> "unknown"
 }
 

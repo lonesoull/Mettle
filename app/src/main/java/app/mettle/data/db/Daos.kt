@@ -140,3 +140,20 @@ interface TrackDao {
     @Query("DELETE FROM track_points WHERE tMs < :beforeMs")
     suspend fun deleteBefore(beforeMs: Long)
 }
+
+@Dao
+interface PlaceDao {
+    @Query("SELECT * FROM places WHERE deletedAt IS NULL ORDER BY name")
+    fun all(): Flow<List<PlaceEntity>>
+
+    @Query("SELECT * FROM places WHERE id = :id")
+    suspend fun get(id: String): PlaceEntity?
+
+    @Query("SELECT * FROM places WHERE syncState = 'DIRTY'")
+    suspend fun dirty(): List<PlaceEntity>
+
+    @Upsert suspend fun upsert(place: PlaceEntity)
+
+    @Query("UPDATE places SET syncState = 'SYNCED' WHERE id = :id AND updatedAt = :updatedAt")
+    suspend fun markSynced(id: String, updatedAt: Long)
+}

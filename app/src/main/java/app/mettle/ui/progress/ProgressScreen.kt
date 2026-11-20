@@ -23,7 +23,7 @@ import app.mettle.ui.components.TopBar
 import app.mettle.ui.theme.MettleColors
 
 @Composable
-fun ProgressScreen(db: MettleDatabase, profile: Profile) {
+fun ProgressScreen(db: MettleDatabase, profile: Profile, onSensorLab: () -> Unit = {}, onAdmin: () -> Unit = {}) {
     val scope = rememberCoroutineScope()
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val recent by db.activities().recent(1).collectAsState(emptyList())
@@ -41,6 +41,8 @@ fun ProgressScreen(db: MettleDatabase, profile: Profile) {
             Text(if (profile.isAdmin) "${profile.displayName} · Admin" else profile.displayName, style = MaterialTheme.typography.titleLarge)
             Text("Height ${profile.heightCm} cm" + (profile.weightKg?.let { " · Weight $it kg" } ?: "") + " · Step goal ${profile.stepGoal}",
                 style = MaterialTheme.typography.bodyLarge, color = MettleColors.Ink2)
+            if (profile.isAdmin) TextButton(onClick = onAdmin) { Text("Admin dashboard", color = MettleColors.Orange) }
+            TextButton(onClick = onSensorLab) { Text("Sensor Lab (improve stair detection)", color = MettleColors.Orange) }
             TextButton(onClick = { app.mettle.sync.ProfileCache.clear(ctx); scope.launch { runCatching { Backend.signOut() } } }) { Text("Sign out", color = MettleColors.Orange) }
         }
         Section {

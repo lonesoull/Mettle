@@ -58,6 +58,16 @@ data class LiveWorkout(
     val elevGainM: Double = 0.0,
     val route: List<Pair<Double, Double>> = emptyList(),
     val gpsAccuracyM: Float? = null,
+    // Stairs
+    val machine: Boolean = false,
+    val placeId: String? = null,
+    val steps: Int = 0,
+    val floorsUp: Int = 0,
+    val floorsDown: Int = 0,
+    val setNo: Int = 1,
+    val climbing: Boolean? = null,
+    val sets: List<app.mettle.stairs.StairSet> = emptyList(),
+    val hasBarometer: Boolean = false,
 )
 
 /**
@@ -73,6 +83,12 @@ class WorkoutService : Service(), SensorEventListener {
     private var pressure: Float? = null
     private lateinit var sensors: SensorManager
     private var tts: android.speech.tts.TextToSpeech? = null
+    private val stepTimes = ArrayList<Long>()
+    private val altitude = ArrayList<Pair<Long, Double>>()
+    private val laps = ArrayList<Long>()
+    private var lastPressureRow = 0L
+    private var stepsPerFloor = 22
+    private var floorHeight = 3.0
     private var spokenKm = 0
     private val db get() = (application as MettleApplication).database
 
@@ -105,7 +121,9 @@ class WorkoutService : Service(), SensorEventListener {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_START -> begin(ActivityType.valueOf(intent.getStringExtra(EXTRA_TYPE) ?: "RUN"))
+            ACTION_START -> begin(ActivityType.valueOf(intent.getStringExtra(EXTRA_TYPE) ?: "RUN"),
+                intent.getBooleanExtra(EXTRA_MACHINE, false), intent.getStringExtra(EXTRA_PLACE))
+            ACTION_LAP -> lap()
             ACTION_PAUSE -> state.value = state.value.copy(paused = true)
             ACTION_RESUME -> state.value = state.value.copy(paused = false)
             ACTION_FINISH -> { finish(); return START_NOT_STICKY }
@@ -113,16 +131,29 @@ class WorkoutService : Service(), SensorEventListener {
         return START_STICKY
     }
 
-    private fun begin(type: ActivityType) {
+    private fun begin(type: ActivityType, machine: Boolean, placeId: String?) {
         if (state.value.recording) return
         val id = UUID.randomUUID().toString()
-        state.value = LiveWorkout(sessionId = id, type = type, startedAt = System.currentTimeMillis(), recording = true)
+        val baro = sensors.getDefaultSensor(Sensor.TYPE_PRESSURE) != null
+        state.value = LiveWorkout(sessionId = id, type = type, startedAt = System.currentTimeMillis(), recording = true,
+            machine = machine, placeId = placeId, hasBarometer = baro)
         getSharedPreferences("workout", MODE_PRIVATE).edit().putString("session", id).putString("type", type.name)
-            .putLong("started", state.value.startedAt).apply()
+            .putLong("started", state.value.startedAt).putBoolean("machine", machine).putString("place", placeId).apply()
         startInForeground()
-        sensors.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)?.let { sensors.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
-        sensors.getDefaultSensor(Sensor.TYPE_PRESSURE)?.let { sensors.registerListener(this, it, 1_000_000) }
-        requestLocation()
+        synchronized(stepTimes) { stepTimes.clear(); altitude.clear(); laps.clear() }
+        if (type == ActivityType.STAIRS) {
+            scope.launch {
+                val place = placeId?.let { db.places().get(it) }
+                stepsPerFloor = place?.stepsPerFloor ?: if (machine) 16 else 22
+                floorHeight = place?.floorHeightM ?: 3.0
+            }
+            (sensors.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR) ?: sensors.getDefaultSensor(Sensor.TYPE_STEP_COUNTER))
+                ?.let { sensors.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST) }
+        } else {
+            sensors.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)?.let { sensors.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
+            requestLocation()
+        }
+        sensors.getDefaultSensor(Sensor.TYPE_PRESSURE)?.let { sensors.registerListener(this, it, 500_000) }
         spokenKm = 0
         tts = android.speech.tts.TextToSpeech(this) { ok -> if (ok == android.speech.tts.TextToSpeech.SUCCESS) tts?.language = java.util.Locale.getDefault() }
         scope.launch { ticker() }
@@ -143,6 +174,23 @@ class WorkoutService : Service(), SensorEventListener {
     private suspend fun ticker() {
         var n = 0
         while (scope.isActive && state.value.recording) {
+            if (state.value.type == ActivityType.STAIRS) {
+                val (st, al, lp) = synchronized(stepTimes) { Triple(ArrayList(stepTimes), ArrayList(altitude), ArrayList(laps)) }
+                val r = app.mettle.stairs.StairMath.analyse(st, al.takeIf { state.value.hasBarometer && it.size > 3 }, stepsPerFloor, floorHeight, lp, state.value.machine)
+                val now = System.currentTimeMillis()
+                val lastBout = r.bouts.lastOrNull()
+                val active = lastBout != null && now - lastBout.endMs < 8_000
+                state.value = state.value.copy(
+                    elapsedS = ((now - state.value.startedAt) / 1000).toInt(), movingS = ((now - state.value.startedAt) / 1000).toInt(),
+                    steps = st.size, floorsUp = r.floorsUp, floorsDown = r.floorsDown, sets = r.sets,
+                    setNo = r.sets.size + (if (r.sets.lastOrNull()?.floorsDown ?: 1 > 0) 1 else 0).coerceAtLeast(1),
+                    climbing = if (!active) null else lastBout!!.direction == app.mettle.stairs.Direction.UP || (lastBout.direction == app.mettle.stairs.Direction.FLAT && !state.value.hasBarometer),
+                )
+                if (n++ % 5 == 0) getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID,
+                    notification("▲ ${r.floorsUp} floors · ▼ ${r.floorsDown} · ${Fmt.duration(state.value.elapsedS.toLong())}"))
+                delay(2000)
+                continue
+            }
             val snapshot = synchronized(samples) { ArrayList(samples) }
             val r = WorkoutMath.analyse(snapshot)
             val now = System.currentTimeMillis()
@@ -181,13 +229,47 @@ class WorkoutService : Service(), SensorEventListener {
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
     override fun onSensorChanged(event: SensorEvent) {
+        val live = state.value
+        val now = System.currentTimeMillis() - (android.os.SystemClock.elapsedRealtimeNanos() - event.timestamp) / 1_000_000
         when (event.sensor.type) {
-            Sensor.TYPE_PRESSURE -> pressure = event.values[0]
+            Sensor.TYPE_PRESSURE -> {
+                pressure = event.values[0]
+                if (live.type == ActivityType.STAIRS && live.recording && now - lastPressureRow >= 1000) {
+                    lastPressureRow = now
+                    synchronized(stepTimes) { altitude += now to WorkoutMath.pressureAltitudeM(event.values[0]) }
+                    stairRow(now)
+                }
+            }
+            Sensor.TYPE_STEP_DETECTOR -> if (live.type == ActivityType.STAIRS && live.recording && !live.paused) {
+                synchronized(stepTimes) { stepTimes += now }
+                steps = stepTimes.size
+                stairRow(now)
+            }
             Sensor.TYPE_STEP_COUNTER -> {
                 if (firstSteps == null) firstSteps = event.values[0]
+                val prev = steps ?: 0
                 steps = (event.values[0] - firstSteps!!).toInt()
+                // Stair phones without a step detector: spread the counted steps over now.
+                if (live.type == ActivityType.STAIRS && live.recording && !live.paused) {
+                    synchronized(stepTimes) { repeat((steps!! - prev).coerceIn(0, 50)) { stepTimes += now } }
+                    stairRow(now)
+                }
             }
         }
+    }
+
+    private fun stairRow(t: Long, lap: Boolean = false) {
+        val live = state.value
+        scope.launch {
+            db.recording().insert(RecordingSampleEntity(sessionId = live.sessionId!!, tMs = t, lat = null, lon = null, accuracyM = null,
+                altitudeM = null, speedMs = null, steps = steps, paused = live.paused, pressureHpa = pressure, lap = lap))
+        }
+    }
+
+    private fun lap() {
+        val now = System.currentTimeMillis()
+        synchronized(stepTimes) { laps += now }
+        stairRow(now, lap = true)
     }
 
     private fun startInForeground() {
@@ -215,16 +297,21 @@ class WorkoutService : Service(), SensorEventListener {
         private const val ACTION_START = "start"; private const val ACTION_PAUSE = "pause"
         private const val ACTION_RESUME = "resume"; private const val ACTION_FINISH = "finish"
         private const val EXTRA_TYPE = "type"
+        private const val EXTRA_MACHINE = "machine"
+        private const val EXTRA_PLACE = "place"
+        private const val ACTION_LAP = "lap"
 
         val state = MutableStateFlow(LiveWorkout())
         val live: StateFlow<LiveWorkout> get() = state
 
-        private fun send(c: Context, action: String, type: ActivityType? = null) {
+        private fun send(c: Context, action: String, type: ActivityType? = null, machine: Boolean = false, placeId: String? = null) {
             val i = Intent(c, WorkoutService::class.java).setAction(action)
             type?.let { i.putExtra(EXTRA_TYPE, it.name) }
+            i.putExtra(EXTRA_MACHINE, machine); placeId?.let { i.putExtra(EXTRA_PLACE, it) }
             if (action == ACTION_START) ContextCompat.startForegroundService(c, i) else c.startService(i)
         }
-        fun start(c: Context, type: ActivityType) = send(c, ACTION_START, type)
+        fun start(c: Context, type: ActivityType, machine: Boolean = false, placeId: String? = null) = send(c, ACTION_START, type, machine, placeId)
+        fun newSet(c: Context) = send(c, ACTION_LAP)
         fun pause(c: Context) = send(c, ACTION_PAUSE)
         fun resume(c: Context) = send(c, ACTION_RESUME)
         fun finish(c: Context) = send(c, ACTION_FINISH)

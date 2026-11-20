@@ -14,9 +14,9 @@ import androidx.room.TypeConverters
         ActivityTagEntity::class, GoalEntity::class, RecordingSampleEntity::class,
         DayMinuteEntity::class, TrackPointEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
-    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4)],
 )
 @TypeConverters(Converters::class)
 abstract class MettleDatabase : RoomDatabase() {
@@ -28,6 +28,7 @@ abstract class MettleDatabase : RoomDatabase() {
     abstract fun goals(): GoalDao
     abstract fun day(): DayDao
     abstract fun track(): TrackDao
+    abstract fun places(): PlaceDao
 
     companion object {
         @Volatile private var instance: MettleDatabase? = null

@@ -71,6 +71,7 @@ class TrackingService : Service(), SensorEventListener {
     private val zone get() = ZoneId.systemDefault()
     private val db get() = (application as MettleApplication).database
     private val prefs get() = getSharedPreferences("tracking", MODE_PRIVATE)
+    private val altBuffer = ArrayDeque<Pair<Long, Double>>()   // last few minutes of barometric height
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
@@ -176,7 +177,13 @@ class TrackingService : Service(), SensorEventListener {
     override fun onSensorChanged(event: SensorEvent) {
         val wallMs = System.currentTimeMillis() - (SystemClock.elapsedRealtimeNanos() - event.timestamp) / 1_000_000
         when (event.sensor.type) {
-            Sensor.TYPE_PRESSURE -> TrackingState.lastPressureHpa = event.values[0]
+            Sensor.TYPE_PRESSURE -> {
+                TrackingState.lastPressureHpa = event.values[0]
+                synchronized(altBuffer) {
+                    altBuffer.addLast(wallMs to app.mettle.workout.WorkoutMath.pressureAltitudeM(event.values[0]))
+                    while (altBuffer.isNotEmpty() && altBuffer.first().first < wallMs - 6 * 60_000) altBuffer.removeFirst()
+                }
+            }
             Sensor.TYPE_STEP_DETECTOR -> addSteps(wallMs, 1)
             Sensor.TYPE_STEP_COUNTER -> {
                 val total = event.values[0].toLong()
@@ -225,9 +232,31 @@ class TrackingService : Service(), SensorEventListener {
             val now = Instant.now().atZone(zone)
             val day = now.toLocalDate().toString()
             val minute = now.hour * 60 + now.minute
+            val posture = if (TrackingState.sensorState in setOf(DayState.STILL, DayState.UNKNOWN)) probePosture() else null
             writeLock.withLock {
-                if (db.day().minute(day, minute) == null) {
-                    db.day().upsert(DayMinuteEntity(day, minute, 0, DayMath.resolve(TrackingState.sensorState, 0), System.currentTimeMillis()))
+                val existing = db.day().minute(day, minute)
+                if (existing == null) {
+                    db.day().upsert(DayMinuteEntity(day, minute, 0, posture ?: DayMath.resolve(TrackingState.sensorState, 0), System.currentTimeMillis()))
+                } else if (posture != null && existing.steps < 10) {
+                    db.day().upsert(existing.copy(state = posture, updatedAt = System.currentTimeMillis()))
+                }
+                // Barometer phones: floors and lift rides in the minute that just ended.
+                val prevT = now.minusMinutes(1)
+                val prevDay = prevT.toLocalDate().toString(); val prevMin = prevT.hour * 60 + prevT.minute
+                val startMs = prevT.withSecond(0).withNano(0).toInstant().toEpochMilli()
+                val alt = synchronized(altBuffer) { ArrayList(altBuffer) }
+                val dh = if (alt.size > 10) app.mettle.stairs.StairMath.heightChange(alt, startMs, startMs + 60_000) else null
+                if (dh != null && kotlin.math.abs(dh) >= 1.8) {
+                    val row = db.day().minute(prevDay, prevMin)
+                    if (row != null && row.floorsUp == 0 && row.floorsDown == 0 && row.liftTrips == 0) {
+                        val floors = kotlin.math.round(kotlin.math.abs(dh) / 3.0).toInt().coerceAtLeast(1)
+                        db.day().upsert(when {
+                            row.steps < 8 && kotlin.math.abs(dh) >= 4.5 -> row.copy(liftTrips = 1)
+                            row.steps >= 8 && dh > 0 -> row.copy(floorsUp = floors)
+                            row.steps >= 8 -> row.copy(floorsDown = floors)
+                            else -> row
+                        }.copy(updatedAt = System.currentTimeMillis()))
+                    }
                 }
             }
             if (minute % 5 == 0) {
@@ -236,6 +265,31 @@ class TrackingService : Service(), SensorEventListener {
                     .notify(NOTIFICATION_ID, notification(String.format(Locale.US, "Tracking your day · %,d steps", steps)))
             }
             delay(60_000L - System.currentTimeMillis() % 60_000L + 500)
+        }
+    }
+
+    /**
+     * Two seconds of accelerometer while still: phone tilt tells sitting from standing
+     * (works best with the phone in a trouser pocket). Flat and motionless = on a table.
+     */
+    private suspend fun probePosture(): DayState? {
+        val accel = sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) ?: return null
+        val xs = ArrayList<FloatArray>()
+        val listener = object : SensorEventListener {
+            override fun onAccuracyChanged(s: Sensor?, a: Int) = Unit
+            override fun onSensorChanged(e: SensorEvent) { synchronized(xs) { xs += e.values.copyOf() } }
+        }
+        sensors.registerListener(listener, accel, SensorManager.SENSOR_DELAY_GAME)
+        delay(2000)
+        sensors.unregisterListener(listener)
+        val v = synchronized(xs) { ArrayList(xs) }
+        if (v.size < 20) return null
+        val mx = v.map { it[0] }.average(); val my = v.map { it[1] }.average(); val mz = v.map { it[2] }.average()
+        val variance = v.map { (it[0] - mx).let { d -> d * d } + (it[1] - my).let { d -> d * d } + (it[2] - mz).let { d -> d * d } }.average()
+        return when {
+            variance < 0.0008 && kotlin.math.abs(mz) > 9.0 -> DayState.STILL          // lying on a table, not on the body
+            kotlin.math.abs(my) > 7.0 -> DayState.STANDING                                // phone upright in a pocket
+            else -> DayState.SITTING                                                      // thigh horizontal
         }
     }
 

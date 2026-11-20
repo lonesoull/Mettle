@@ -49,13 +49,15 @@ private val modes = listOf(
 )
 
 @Composable
-fun RecordScreen(onClose: () -> Unit, onStarted: () -> Unit) {
+fun RecordScreen(db: app.mettle.data.db.MettleDatabase, onClose: () -> Unit, onStarted: () -> Unit, onCalibrate: (String) -> Unit) {
+    var placeId by rememberSaveable { mutableStateOf<String?>(null) }
     var selected by rememberSaveable { mutableStateOf(ActivityType.RUN) }
     var machine by rememberSaveable { mutableStateOf(false) }
     var showNotice by rememberSaveable { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
     val askLocation = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) { granted ->
-        if (granted[android.Manifest.permission.ACCESS_FINE_LOCATION] == true) { app.mettle.workout.WorkoutService.start(context, selected); onStarted() }
+        if (selected == ActivityType.STAIRS) { app.mettle.workout.WorkoutService.start(context, selected, machine, placeId); onStarted() }
+        else if (granted[android.Manifest.permission.ACCESS_FINE_LOCATION] == true) { app.mettle.workout.WorkoutService.start(context, selected); onStarted() }
     }
 
     Column(Modifier.fillMaxSize().background(MettleColors.Surface).statusBarsPadding()) {
@@ -78,12 +80,18 @@ fun RecordScreen(onClose: () -> Unit, onStarted: () -> Unit) {
                     Segment("Stairwell", !machine, Modifier.weight(1f)) { machine = false }
                     Segment("Stair machine", machine, Modifier.weight(1f)) { machine = true }
                 }
+                if (!machine) app.mettle.ui.stairs.BuildingPicker(db, placeId, { placeId = it }, onCalibrate)
             }
             Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
                 Box(
                     Modifier.size(88.dp).shadow(12.dp, CircleShape, spotColor = MettleColors.Orange).clip(CircleShape)
                         .background(MettleColors.Orange).clickable(role = Role.Button) {
-                            if (selected == ActivityType.STAIRS) { showNotice = true; return@clickable }
+                            if (selected == ActivityType.STAIRS) {
+                                val ok = android.os.Build.VERSION.SDK_INT < 29 || androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACTIVITY_RECOGNITION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                                if (ok) { app.mettle.workout.WorkoutService.start(context, selected, machine, placeId); onStarted() }
+                                else askLocation.launch(arrayOf(android.Manifest.permission.ACTIVITY_RECOGNITION))
+                                return@clickable
+                            }
                             val ok = androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
                             if (ok) { app.mettle.workout.WorkoutService.start(context, selected); onStarted() }
                             else askLocation.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))

@@ -53,12 +53,15 @@ fun stateColor(s: DayState): Color = when (s) {
     DayState.CYCLING -> MettleColors.OrangeDeep
     DayState.VEHICLE -> MettleColors.Descent
     DayState.STILL -> Color(0xFFD4D4D8)
+    DayState.SITTING -> Color(0xFFC4C4CC)
+    DayState.STANDING -> Color(0xFF9CA3AF)
     DayState.UNKNOWN -> MettleColors.Line
 }
 
 private fun stateLabel(s: DayState) = when (s) {
     DayState.RUNNING -> "Running"; DayState.WALKING -> "Walking"; DayState.CYCLING -> "Cycling"
     DayState.VEHICLE -> "Vehicle"; DayState.STILL -> "Still"; DayState.UNKNOWN -> "Unknown"
+    DayState.SITTING -> "Sitting"; DayState.STANDING -> "Standing"
 }
 
 @Composable
@@ -109,6 +112,7 @@ fun TodayCard(db: MettleDatabase, trackingOn: Boolean, onSetup: () -> Unit) {
                 Mini("Distance", Fmt.km2(s.distanceM.toLong()) + " km")
                 Mini("Active", "${s.activeMin} min")
                 Mini("Calories", "${s.activeCalories} kcal")
+                if (s.floorsUp + s.floorsDown + s.liftTrips > 0) Mini("Floors", "▲${s.floorsUp} ▼${s.floorsDown}" + if (s.liftTrips > 0) " · lift ${s.liftTrips}" else "")
             }
         }
         // 24-hour timeline
@@ -126,7 +130,7 @@ fun TodayCard(db: MettleDatabase, trackingOn: Boolean, onSetup: () -> Unit) {
                 listOf("00", "06", "12", "18", "24").forEach { Text(it, style = MettleType.Label, color = MettleColors.Muted) }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 4.dp)) {
-                listOf(DayState.STILL, DayState.WALKING, DayState.RUNNING, DayState.VEHICLE).forEach { st ->
+                listOf(DayState.SITTING, DayState.STANDING, DayState.WALKING, DayState.RUNNING, DayState.VEHICLE).forEach { st ->
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         Box(Modifier.size(8.dp).clip(CircleShape).background(stateColor(st)))
                         Text(stateLabel(st), style = MettleType.Label, color = MettleColors.Sub)

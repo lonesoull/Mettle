@@ -2,6 +2,7 @@ package app.mettle.ui
 
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -10,6 +11,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -38,7 +40,7 @@ fun MettleApp(db: MettleDatabase, profile: Profile, onSignOut: () -> Unit) {
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
     val current = backStack?.destination
-    val onRecord = current?.route in setOf(Tab.Record.route, "recording", "save", "setup") || current?.route?.startsWith("activity") == true
+    val onRecord = current?.route in setOf(Tab.Record.route, "recording", "save", "setup", "calibrate/{id}", "activity/{id}", "sensorlab", "admin") || current?.route?.startsWith("activity") == true
 
     Scaffold(
         containerColor = MettleColors.Band,
@@ -79,7 +81,9 @@ fun MettleApp(db: MettleDatabase, profile: Profile, onSignOut: () -> Unit) {
                     onSetup = { nav.navigate("setup") }, onOpen = { id -> nav.navigate("activity/$id") }, onResumeSave = { nav.navigate("save") })
             }
             composable("recording") {
-                app.mettle.ui.workout.RecordingScreen(onFinished = { nav.navigate("save") { popUpTo(Tab.Home.route) } })
+                val live by app.mettle.workout.WorkoutService.live.collectAsState()
+                if (live.type == app.mettle.data.db.ActivityType.STAIRS) app.mettle.ui.stairs.StairRecordingScreen(onFinished = { nav.navigate("save") { popUpTo(Tab.Home.route) } })
+                else app.mettle.ui.workout.RecordingScreen(onFinished = { nav.navigate("save") { popUpTo(Tab.Home.route) } })
             }
             composable("save") {
                 val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -93,8 +97,18 @@ fun MettleApp(db: MettleDatabase, profile: Profile, onSignOut: () -> Unit) {
                 app.mettle.ui.workout.ActivityDetailScreen(db, entry.arguments?.getString("id") ?: "", onBack = { nav.popBackStack() })
             }
             composable("setup") { app.mettle.ui.tracking.TrackingSetupScreen(onDone = { nav.popBackStack() }) }
-            composable(Tab.Record.route) { RecordScreen(onClose = { nav.popBackStack() }, onStarted = { nav.navigate("recording") { popUpTo(Tab.Home.route) } }) }
-            composable(Tab.Progress.route) { ProgressScreen(db, profile) }
+            composable(Tab.Record.route) {
+                RecordScreen(db, onClose = { nav.popBackStack() }, onStarted = { nav.navigate("recording") { popUpTo(Tab.Home.route) } },
+                    onCalibrate = { id -> nav.navigate("calibrate/$id") })
+            }
+            composable("calibrate/{id}") { e -> app.mettle.ui.stairs.CalibrationScreen(db, e.arguments?.getString("id") ?: "", onDone = { nav.popBackStack() }) }
+            composable(Tab.Progress.route) { ProgressScreen(db, profile, onSensorLab = { nav.navigate("sensorlab") }, onAdmin = { nav.navigate("admin") }) }
+            composable("admin") {
+                androidx.compose.foundation.layout.Box(Modifier.padding(32.dp)) {
+                    Text("The admin dashboard (live group map) arrives in the next update.")
+                }
+            }
+            composable("sensorlab") { app.mettle.ui.lab.SensorLabScreen(onBack = { nav.popBackStack() }) }
         }
     }
 }

@@ -54,6 +54,7 @@ import java.time.format.DateTimeFormatter
 fun effortLabel(e: String) = when (e) {
     "run_400m" -> "400 m"; "run_1k" -> "1 km"; "run_1mi" -> "1 mile"; "run_5k" -> "5 km"
     "run_10k" -> "10 km"; "run_half" -> "Half marathon"
+    "stairs_up_10fl" -> "10 floors up"; "stairs_up_50fl" -> "50 floors up"; "stairs_down_15fl" -> "15 floors down"
     else -> e.replace('_', ' ')
 }
 
@@ -95,6 +96,26 @@ fun ActivityDetailScreen(db: MettleDatabase, activityId: String, onBack: () -> U
                 }
             }
         }
+        val sets = laps.filter { it.kind == LapKind.STAIR_SET }
+        if (sets.isNotEmpty()) item {
+            Section {
+                Text("Sets", style = MaterialTheme.typography.titleLarge)
+                Row(Modifier.fillMaxWidth()) {
+                    Text("Set", style = MettleType.Label, color = MettleColors.Sub, modifier = Modifier.width(40.dp))
+                    Text("▲ floors · time", style = MettleType.Label, color = MettleColors.Orange, modifier = Modifier.weight(1f))
+                    Text("▼ floors · time", style = MettleType.Label, color = MettleColors.Descent, modifier = Modifier.weight(1f))
+                    Text("Rest", style = MettleType.Label, color = MettleColors.Sub, modifier = Modifier.width(48.dp))
+                }
+                sets.forEach { st ->
+                    Row(Modifier.fillMaxWidth()) {
+                        Text("${st.idx}", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.width(40.dp))
+                        Text("${st.floorsUp} · ${Fmt.duration((st.climbS ?: 0).toLong())}", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                        Text(if (st.floorsDown > 0) "${st.floorsDown} · ${Fmt.duration((st.descentS ?: 0).toLong())}" else "–", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                        Text(Fmt.duration((st.restS ?: 0).toLong()), style = MettleType.Label, color = MettleColors.Sub, modifier = Modifier.width(48.dp))
+                    }
+                }
+            }
+        }
         if (efforts.isNotEmpty()) item {
             Section {
                 Text("Best efforts", style = MaterialTheme.typography.titleLarge)
@@ -120,7 +141,11 @@ private fun Header(a: ActivityEntity) {
         Text(Instant.ofEpochMilli(a.startedAt).atZone(zone).format(DateTimeFormatter.ofPattern("EEEE d MMM 'at' h:mm a")),
             style = MettleType.Label, color = MettleColors.Sub)
         a.description?.let { Text(it, style = MaterialTheme.typography.bodyLarge, color = MettleColors.Ink2) }
-        Row(Modifier.fillMaxWidth()) {
+        if (a.type == app.mettle.data.db.ActivityType.STAIRS) Row(Modifier.fillMaxWidth()) {
+            Column(Modifier.weight(1f)) { Text("▲ Floors up", style = MettleType.Label, color = MettleColors.Orange); Text("${a.floorsUp}", style = MettleType.StatLarge) }
+            Column(Modifier.weight(1f)) { Text("▼ Floors down", style = MettleType.Label, color = MettleColors.Descent); Text("${a.floorsDown}", style = MettleType.StatLarge) }
+            Column(Modifier.weight(1f)) { Text("Time", style = MettleType.Label, color = MettleColors.Sub); Text(Fmt.duration(a.elapsedS.toLong()), style = MettleType.StatLarge) }
+        } else Row(Modifier.fillMaxWidth()) {
             Column(Modifier.weight(1f)) { Text("Distance", style = MettleType.Label, color = MettleColors.Sub); Text(Fmt.km2(a.distanceM.toLong()), style = MettleType.StatLarge) }
             Column(Modifier.weight(1f)) { Text("Pace /km", style = MettleType.Label, color = MettleColors.Sub); Text(Fmt.pace(a.avgPaceSKm), style = MettleType.StatLarge) }
             Column(Modifier.weight(1f)) { Text("Time", style = MettleType.Label, color = MettleColors.Sub); Text(Fmt.duration(a.movingS.toLong()), style = MettleType.StatLarge) }
