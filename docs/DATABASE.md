@@ -7,6 +7,11 @@ Two copies of the same data model:
 | Phone | Room (SQLite) — `app/src/main/java/app/mettle/data/db` | Everything works offline. Workouts are saved here first. |
 | Server | Supabase Postgres + PostGIS — `supabase/migrations` | Logins, backup, sync between devices, the group feed. |
 
+## Who can see what
+- **Each member** sees only their own data, plus workouts others shared to the group feed.
+- **The admin** (you) can read every member's data but cannot change it. Members agree to this on a consent screen at first login (`profiles.admin_visibility_accepted_at`).
+- Only the admin can change roles; the first admin is set once from the Supabase SQL editor.
+
 ## Rules that keep sync simple
 - **IDs are made on the phone** (UUIDs), so an offline workout keeps the same id after it uploads.
 - **`updated_at` + last write wins** decides conflicts; **`deleted_at`** is a soft delete so deletions sync too.
@@ -29,6 +34,8 @@ Two copies of the same data model:
 | `goals` | weekly/monthly/yearly goal | metric (distance, time, climb, floors, count), target |
 | `segments` / `segment_efforts` | personal segment / attempt on it | road, trail or stair segment; shared ones form small-group leaderboards |
 | `kudos`, `comments` | social interaction | within the group only |
+| `daily_summaries` | member per day | steps, estimated distance, active/walking/running/still/vehicle minutes, floors up/down (estimate), active calories |
+| `day_segments` | stretch of one state in the day timeline | still / walking / running / stairs up / stairs down / vehicle / cycling, steps, floors, confidence, phone placement (pocket/hand/bag/armband/table) |
 | `sensor_lab_recordings` | labelled raw sensor recording | used to tune stair detection on phones without a barometer |
 
 Phone-only table: `recording_samples` — a crash-safe buffer written every second during a workout, compacted into the streams file when you press Save.
@@ -46,7 +53,8 @@ Phone-only table: `recording_samples` — a crash-safe buffer written every seco
 
 ## Setting up the server (done once, when we reach release 3)
 1. Create a free Supabase project.
-2. Run `supabase/migrations/20261119000000_init.sql` in its SQL editor.
-3. Authentication → turn **off** "Allow new users to sign up"; invite each member by email.
+2. Run `supabase/migrations/20261119000000_init.sql`, then `20261120000000_all_day_and_admin.sql`, in its SQL editor.
+3. After your first login, make yourself admin with the one-line `update profiles …` at the bottom of the second script.
+4. Authentication → turn **off** "Allow new users to sign up"; invite each member by email.
 
 The migration has been tested against Postgres 16 + PostGIS, including the privacy rules (a second member sees your group workouts in the feed, cannot see private ones, and cannot read your raw rows).
