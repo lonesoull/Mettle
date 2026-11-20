@@ -1,6 +1,7 @@
 package app.mettle.data.db
 
 import android.content.Context
+import androidx.room.AutoMigration
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
@@ -11,9 +12,11 @@ import androidx.room.TypeConverters
         ActivityEntity::class, LapEntity::class, BestEffortEntity::class, GearEntity::class,
         PlaceEntity::class, PrivacyZoneEntity::class, RouteEntity::class, TagEntity::class,
         ActivityTagEntity::class, GoalEntity::class, RecordingSampleEntity::class,
+        DayMinuteEntity::class, TrackPointEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true,
+    autoMigrations = [AutoMigration(from = 1, to = 2)],
 )
 @TypeConverters(Converters::class)
 abstract class MettleDatabase : RoomDatabase() {
@@ -23,6 +26,8 @@ abstract class MettleDatabase : RoomDatabase() {
     abstract fun recording(): RecordingDao
     abstract fun gear(): GearDao
     abstract fun goals(): GoalDao
+    abstract fun day(): DayDao
+    abstract fun track(): TrackDao
 
     companion object {
         @Volatile private var instance: MettleDatabase? = null

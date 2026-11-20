@@ -22,10 +22,16 @@ import app.mettle.ui.auth.ProfileSetupScreen
 import app.mettle.ui.auth.SignInScreen
 import app.mettle.ui.theme.MettleColors
 import app.mettle.update.UpdateBanner
+import androidx.compose.ui.platform.LocalContext
+import app.mettle.sync.ProfileCache
+import app.mettle.sync.SyncWorker
+import app.mettle.tracking.TrackingService
+import app.mettle.ui.tracking.setupStatus
 
 /** Signed out → sign in; signed in without height → profile setup; otherwise the app. */
 @Composable
 fun Root(db: MettleDatabase) {
+    val context = LocalContext.current
     val auth by Backend.authState.collectAsState(AuthState.Loading)
     var profile by remember { mutableStateOf<Profile?>(null) }
     var profileLoaded by remember { mutableStateOf(false) }
@@ -37,6 +43,9 @@ fun Root(db: MettleDatabase) {
         if (signedIn != null) {
             profile = runCatching { Backend.loadProfile(signedIn.userId) }.getOrNull()
             profileLoaded = true
+            profile?.let { ProfileCache.save(context, it.heightCm, it.weightKg, it.stepGoal) }
+            SyncWorker.schedule(context)
+            if (TrackingService.isEnabled(context) && setupStatus(context).essentials) runCatching { TrackingService.start(context) }
         }
     }
 
@@ -51,10 +60,13 @@ private fun RootContent(
     db: MettleDatabase, auth: AuthState, signedIn: AuthState.SignedIn?, profile: Profile?, profileLoaded: Boolean,
     onProfile: (Profile) -> Unit,
 ) {
+    val context = LocalContext.current
     when {
         auth is AuthState.SignedOut -> SignInScreen()
         signedIn == null || !profileLoaded -> Loading()
-        profile?.isComplete != true -> ProfileSetupScreen(signedIn.userId, profile, onProfile)
+        profile?.isComplete != true -> ProfileSetupScreen(signedIn.userId, profile) { p ->
+            ProfileCache.save(context, p.heightCm, p.weightKg, p.stepGoal); onProfile(p)
+        }
         else -> MettleApp(db, profile, onSignOut = { })
     }
 }

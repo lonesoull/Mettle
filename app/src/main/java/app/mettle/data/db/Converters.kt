@@ -17,6 +17,8 @@ class Converters {
     @TypeConverter fun goalMetric(v: String): GoalMetric = GoalMetric.valueOf(v)
     @TypeConverter fun goalPeriod(v: GoalPeriod): String = v.name
     @TypeConverter fun goalPeriod(v: String): GoalPeriod = GoalPeriod.valueOf(v)
+    @TypeConverter fun dayState(v: DayState): String = v.name
+    @TypeConverter fun dayState(v: String): DayState = DayState.valueOf(v)
     @TypeConverter fun syncState(v: SyncState): String = v.name
     @TypeConverter fun syncState(v: String): SyncState = SyncState.valueOf(v)
 }

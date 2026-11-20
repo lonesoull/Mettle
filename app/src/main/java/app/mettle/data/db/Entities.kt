@@ -199,3 +199,30 @@ data class RecordingSampleEntity(
     val steps: Int?,                     // cumulative step count
     val paused: Boolean,
 )
+
+/** All-day tracking: what happened in each minute of the day (local only, summarised for the server). */
+enum class DayState { STILL, WALKING, RUNNING, VEHICLE, CYCLING, UNKNOWN }
+
+@Entity(tableName = "day_minutes", primaryKeys = ["day", "minute"])
+data class DayMinuteEntity(
+    val day: String,                     // local date, e.g. 2026-11-21
+    val minute: Int,                     // 0..1439 local minute of the day
+    val steps: Int,
+    val state: DayState,
+    val updatedAt: Long,
+)
+
+/** All-day position samples (local; uploaded later as one compressed file per day). */
+@Entity(tableName = "track_points", indices = [Index("tMs")])
+data class TrackPointEntity(
+    @PrimaryKey(autoGenerate = true) val rowId: Long = 0,
+    val tMs: Long,
+    val lat: Double,
+    val lon: Double,
+    val altitudeM: Double?,
+    val accuracyM: Float?,
+    val verticalAccuracyM: Float?,
+    val speedMs: Float?,
+    val pressureHpa: Float?,             // barometer phones only
+    val state: DayState,
+)

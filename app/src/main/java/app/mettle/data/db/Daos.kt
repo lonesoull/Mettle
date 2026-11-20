@@ -89,3 +89,37 @@ interface GoalDao {
 
     @Upsert suspend fun upsert(goal: GoalEntity)
 }
+
+@Dao
+interface DayDao {
+    @Query("SELECT * FROM day_minutes WHERE day = :day ORDER BY minute")
+    fun minutes(day: String): Flow<List<DayMinuteEntity>>
+
+    @Query("SELECT * FROM day_minutes WHERE day = :day ORDER BY minute")
+    suspend fun minutesNow(day: String): List<DayMinuteEntity>
+
+    @Query("SELECT * FROM day_minutes WHERE day = :day AND minute = :minute")
+    suspend fun minute(day: String, minute: Int): DayMinuteEntity?
+
+    @Upsert suspend fun upsert(minute: DayMinuteEntity)
+
+    @Query("SELECT DISTINCT day FROM day_minutes WHERE updatedAt >= :sinceMs")
+    suspend fun daysChangedSince(sinceMs: Long): List<String>
+
+    @Query("DELETE FROM day_minutes WHERE day < :beforeDay")
+    suspend fun deleteBefore(beforeDay: String)
+}
+
+@Dao
+interface TrackDao {
+    @Insert suspend fun insert(point: TrackPointEntity)
+
+    @Query("SELECT * FROM track_points ORDER BY tMs DESC LIMIT 1")
+    suspend fun latest(): TrackPointEntity?
+
+    @Query("SELECT * FROM track_points WHERE tMs >= :fromMs AND tMs < :toMs ORDER BY tMs")
+    suspend fun between(fromMs: Long, toMs: Long): List<TrackPointEntity>
+
+    @Query("DELETE FROM track_points WHERE tMs < :beforeMs")
+    suspend fun deleteBefore(beforeMs: Long)
+}

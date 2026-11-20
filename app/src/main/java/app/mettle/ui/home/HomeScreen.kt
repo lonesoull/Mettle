@@ -29,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,7 +61,13 @@ private const val DEFAULT_KM_GOAL = 25_000L
 private const val DEFAULT_FLOORS_GOAL = 200L
 
 @Composable
-fun HomeScreen(db: MettleDatabase, onRecord: () -> Unit, onProgress: () -> Unit) {
+fun HomeScreen(db: MettleDatabase, onRecord: () -> Unit, onProgress: () -> Unit, onSetup: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var trackingOn by remember { androidx.compose.runtime.mutableStateOf(false) }
+    androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
+        trackingOn = app.mettle.tracking.TrackingService.isEnabled(ctx) && app.mettle.ui.tracking.setupStatus(ctx).essentials
+        onPauseOrDispose { }
+    }
     val zone = remember { ZoneId.systemDefault() }
     val weekStart = remember { LocalDate.now(zone).with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)) }
     val from = remember { weekStart.atStartOfDay(zone).toInstant().toEpochMilli() }
@@ -73,6 +80,7 @@ fun HomeScreen(db: MettleDatabase, onRecord: () -> Unit, onProgress: () -> Unit)
         TopBar("METTLE", wordmark = true)
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
             item { Spacer(Modifier.height(0.dp)) }
+            item { TodayCard(db, trackingOn, onSetup) }
             item { WeekCard(totals, week, weekStart, zone, onProgress) }
             if (recent.isEmpty()) {
                 item { EmptyFeed(onRecord) }

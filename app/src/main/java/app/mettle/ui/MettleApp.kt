@@ -73,7 +73,8 @@ fun MettleApp(db: MettleDatabase, profile: Profile, onSignOut: () -> Unit) {
         },
     ) { padding ->
         NavHost(nav, startDestination = Tab.Home.route, modifier = Modifier.padding(padding)) {
-            composable(Tab.Home.route) { HomeScreen(db, onRecord = { nav.navigate(Tab.Record.route) }, onProgress = { nav.navigate(Tab.Progress.route) }) }
+            composable(Tab.Home.route) { HomeScreen(db, onRecord = { nav.navigate(Tab.Record.route) }, onProgress = { nav.navigate(Tab.Progress.route) }, onSetup = { nav.navigate("setup") }) }
+            composable("setup") { app.mettle.ui.tracking.TrackingSetupScreen(onDone = { nav.popBackStack() }) }
             composable(Tab.Record.route) { RecordScreen(onClose = { nav.popBackStack() }) }
             composable(Tab.Progress.route) { ProgressScreen(db, profile) }
         }
