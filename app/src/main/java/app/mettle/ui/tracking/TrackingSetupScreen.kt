@@ -65,7 +65,7 @@ fun setupStatus(c: Context) = SetupStatus(
 
 @SuppressLint("BatteryLife")
 @Composable
-fun TrackingSetupScreen(onDone: () -> Unit) {
+fun TrackingSetupScreen(onDone: () -> Unit, onBack: () -> Unit = onDone) {
     val context = LocalContext.current
     var refresh by remember { mutableIntStateOf(0) }
     LifecycleResumeEffect(Unit) { refresh++; onPauseOrDispose { } }
@@ -73,7 +73,7 @@ fun TrackingSetupScreen(onDone: () -> Unit) {
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { refresh++ }
 
     Column(Modifier.fillMaxSize().background(MettleColors.Surface)) {
-        TopBar("All-day tracking")
+        TopBar("All-day tracking", onBack = onBack)
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Mettle tracks your steps, activity and where you've been all day, using about 3–6% battery. Allow these once:",
                 style = MaterialTheme.typography.bodyLarge, color = MettleColors.Ink2)
@@ -94,17 +94,11 @@ fun TrackingSetupScreen(onDone: () -> Unit) {
                 context.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${context.packageName}")))
             }
 
-            Button(
-                onClick = {
-                    TrackingService.start(context)
-                    SyncWorker.schedule(context)
-                    onDone()
-                },
-                enabled = status.essentials,
-                colors = ButtonDefaults.buttonColors(containerColor = MettleColors.Orange),
-                shape = RoundedCornerShape(28.dp),
-                modifier = Modifier.fillMaxWidth().height(56.dp).padding(top = 4.dp),
-            ) { Text(if (status.all) "Start tracking" else "Start tracking (finish the rest later)", style = MaterialTheme.typography.labelLarge) }
+            app.mettle.ui.components.PrimaryButton(if (status.all) "Start tracking" else "Start tracking (finish the rest later)", enabled = status.essentials) {
+                TrackingService.start(context)
+                SyncWorker.schedule(context)
+                onDone()
+            }
             if (!status.essentials) {
                 Text("Steps 1 and 2 are needed to start. Location and battery make the tracking complete.",
                     style = MaterialTheme.typography.bodySmall, color = MettleColors.Sub)

@@ -53,6 +53,23 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            all {
+                it.systemProperty("robolectric.graphicsMode", "NATIVE")
+                it.systemProperty("robolectric.pixelCopyRenderMode", "hardware")
+                it.systemProperty("roborazzi.test.record", "true")
+                it.maxHeapSize = "3g"
+                // Screenshot tests: use a pre-downloaded Android runtime when present (local machine only).
+                val deps = File(System.getProperty("user.home"), ".robolectric-deps")
+                if (deps.isDirectory) {
+                    it.systemProperty("robolectric.offline", "true")
+                    it.systemProperty("robolectric.dependency.dir", deps.absolutePath)
+                }
+            }
+        }
+    }
     buildFeatures {
         compose = true
         buildConfig = true
@@ -96,4 +113,10 @@ dependencies {
     implementation(libs.health.connect)
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

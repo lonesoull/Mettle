@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -57,7 +58,7 @@ fun SaveWorkoutScreen(sessionId: String, type: ActivityType, startedAt: Long, on
     val colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MettleColors.Orange, focusedLabelColor = MettleColors.Orange, cursorColor = MettleColors.Orange)
 
     Column(Modifier.fillMaxSize().background(MettleColors.Surface).imePadding()) {
-        TopBar("Save activity") { TextButton(onClick = { confirmDiscard = true }) { Text("Discard", color = MettleColors.Sub) } }
+        TopBar("Save activity") { TextButton(onClick = { confirmDiscard = true }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Discard", color = MettleColors.WarnText) } }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             OutlinedTextField(title, { title = it.take(80) }, label = { Text("Title") }, singleLine = true, colors = colors, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(notes, { notes = it.take(1000) }, label = { Text("How did it go?") }, colors = colors, modifier = Modifier.fillMaxWidth().height(110.dp))
@@ -83,7 +84,7 @@ fun SaveWorkoutScreen(sessionId: String, type: ActivityType, startedAt: Long, on
                     Text(if (shared) "Group sees it; start and end are hidden" else "Only you (and the admin) can see it",
                         style = MaterialTheme.typography.bodySmall, color = MettleColors.Sub)
                 }
-                Switch(shared, { shared = it }, colors = SwitchDefaults.colors(checkedTrackColor = MettleColors.Good))
+                Switch(shared, { shared = it }, colors = SwitchDefaults.colors(checkedTrackColor = MettleColors.Good, uncheckedTrackColor = MettleColors.Band, uncheckedThumbColor = MettleColors.Muted, uncheckedBorderColor = MettleColors.Muted))
             }
         }
         Box(Modifier.fillMaxWidth().padding(16.dp)) {

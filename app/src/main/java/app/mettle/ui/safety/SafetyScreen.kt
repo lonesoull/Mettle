@@ -65,7 +65,7 @@ fun SafetyScreen(onBack: () -> Unit) {
     fun saveNoMove() { SafetyPrefs.setNoMovement(c, noMove, hours, window.first, window.second); AlertUploadWorker.enqueue(c) }
 
     Column(Modifier.fillMaxSize().background(MettleColors.Band)) {
-        TopBar("Safety") { IconButton(onClick = onBack) { Icon(MettleIcons.Close, contentDescription = "Close") } }
+        TopBar("Safety", onBack = onBack)
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Section {
                 Box(Modifier.fillMaxWidth().height(96.dp).clip(RoundedCornerShape(20.dp)).background(Color_SOS)
@@ -141,6 +141,6 @@ private fun ToggleRow(title: String, detail: String, on: Boolean, onChange: (Boo
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text(detail, style = MaterialTheme.typography.bodyMedium, color = MettleColors.Ink2)
         }
-        Switch(on, onChange, colors = SwitchDefaults.colors(checkedTrackColor = MettleColors.Good))
+        Switch(on, onChange, colors = SwitchDefaults.colors(checkedTrackColor = MettleColors.Good, uncheckedTrackColor = MettleColors.Band, uncheckedThumbColor = MettleColors.Muted, uncheckedBorderColor = MettleColors.Muted))
     }
 }

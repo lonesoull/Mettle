@@ -1,5 +1,6 @@
 package app.mettle.ui.space
 
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,6 +24,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -66,7 +70,7 @@ data class ReplayPoint(val tMs: Long, val lat: Double, val lon: Double, val alti
  * activity and height update. [load] returns that day's points (local or from the server).
  */
 @Composable
-fun DayReplayScreen(title: String, places: List<KnownPlace>, load: suspend (LocalDate) -> List<ReplayPoint>, onBack: () -> Unit) {
+fun DayReplayScreen(title: String, places: List<KnownPlace>, db: app.mettle.data.db.MettleDatabase?, load: suspend (LocalDate) -> List<ReplayPoint>, onBack: (() -> Unit)?) {
     val zone = remember { ZoneId.systemDefault() }
     var day by rememberSaveable { mutableStateOf(LocalDate.now(zone).toString()) }
     val date = LocalDate.parse(day)
@@ -91,18 +95,21 @@ fun DayReplayScreen(title: String, places: List<KnownPlace>, load: suspend (Loca
     }
 
     Column(Modifier.fillMaxSize().background(MettleColors.Surface)) {
-        TopBar(title) { IconButton(onClick = onBack) { Icon(MettleIcons.Close, contentDescription = "Close") } }
+        TopBar(title, onBack = onBack)
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { day = date.minusDays(1).toString() }) { Text("‹ Prev", color = MettleColors.Orange) }
+            TextButton(onClick = { day = date.minusDays(1).toString() }, modifier = Modifier.semantics { contentDescription = "Previous day" }) { Text("‹ Prev", color = MettleColors.Orange) }
             Text(date.format(DateTimeFormatter.ofPattern("EEE d MMM")), style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-            TextButton(enabled = date.isBefore(LocalDate.now(zone)), onClick = { day = date.plusDays(1).toString() }) { Text("Next ›", color = MettleColors.Orange) }
+            TextButton(enabled = date.isBefore(LocalDate.now(zone)), onClick = { day = date.plusDays(1).toString() },
+                modifier = Modifier.semantics { contentDescription = "Next day" }) { Text("Next ›", color = MettleColors.Orange) }
         }
-        Box(Modifier.fillMaxWidth().height(320.dp)) {
+        if (db != null) DayTotals(db, day)
+        Box(Modifier.fillMaxWidth().height(280.dp)) {
+            if (!app.mettle.ui.workout.MapsConfig.enabled) Box(Modifier.fillMaxSize().background(MettleColors.Band)) else
             GoogleMap(Modifier.fillMaxSize(), cameraPositionState = camera, properties = MapProperties(isBuildingEnabled = true),
                 uiSettings = MapUiSettings(zoomControlsEnabled = false, mapToolbarEnabled = false)) {
                 if (pts.size >= 2) {
-                    val line = pts.map { LatLng(it.lat, it.lon) }
+                    val line = app.mettle.ui.workout.thin(pts.map { it.lat to it.lon }, 600).map { LatLng(it.first, it.second) }
                     Polyline(points = line, color = MettleColors.Surface, width = 16f)
                     Polyline(points = line, color = MettleColors.Orange, width = 8f)
                 }
@@ -121,16 +128,28 @@ fun DayReplayScreen(title: String, places: List<KnownPlace>, load: suspend (Loca
                     Text(cur?.let { p -> (p.altitudeM?.let { "${it.toInt()} m above sea" } ?: "") + (p.accuracyM?.let { " · ±${it.toInt()} m" } ?: "") } ?: "",
                         style = MettleType.Label, color = MettleColors.Sub)
                 }
-                Box(Modifier.size(52.dp).clip(CircleShape).background(MettleColors.Orange), contentAlignment = Alignment.Center) {
-                    TextButton(onClick = { if (idx >= pts.lastIndex) idx = 0; playing = !playing }) { Text(if (playing) "❚❚" else "▶", color = MettleColors.Surface) }
+                IconButton(onClick = { if (idx >= pts.lastIndex) idx = 0; playing = !playing },
+                    modifier = Modifier.size(52.dp).clip(CircleShape).background(MettleColors.Orange)) {
+                    Icon(if (playing) MettleIcons.Pause else MettleIcons.Play, contentDescription = if (playing) "Pause replay" else "Play replay", tint = MettleColors.Surface)
                 }
             }
             if (pts.size > 1) Slider(value = idx.toFloat(), onValueChange = { idx = it.toInt(); playing = false }, valueRange = 0f..pts.lastIndex.toFloat(),
-                colors = SliderDefaults.colors(thumbColor = MettleColors.Orange, activeTrackColor = MettleColors.Orange))
+                colors = SliderDefaults.colors(thumbColor = MettleColors.Orange, activeTrackColor = MettleColors.Orange,
+                    inactiveTrackColor = MettleColors.Band, activeTickColor = MettleColors.Orange, inactiveTickColor = MettleColors.Band),
+                modifier = Modifier.semantics { contentDescription = "Replay position" })
         }
-        Text("Places", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 16.dp))
+        Text("Places", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+        if (stays.isEmpty() && points != null) Text("No places yet for this day. Places appear after you stay somewhere for 5 minutes or more.",
+            style = MaterialTheme.typography.bodyMedium, color = MettleColors.Sub, modifier = Modifier.padding(horizontal = 16.dp))
+        var showAll by remember(stays) { mutableStateOf(false) }
+        val shown = if (showAll) stays else stays.sortedByDescending { it.endMs - it.startMs }.take(6).sortedBy { it.startMs }
         LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
-            items(stays) { s -> StayRow(s, StayMath.label(s, places), zone) }
+            items(shown) { s -> StayRow(s, StayMath.label(s, places), zone) }
+            if (stays.size > 6) item {
+                androidx.compose.material3.TextButton(onClick = { showAll = !showAll }, modifier = Modifier.padding(horizontal = 4.dp).heightIn(min = 48.dp)) {
+                    Text(if (showAll) "Show longest places only" else "Show all ${stays.size} places", color = MettleColors.Orange, style = MaterialTheme.typography.titleSmall)
+                }
+            }
         }
     }
 }
@@ -141,10 +160,24 @@ private fun StayRow(s: Stay, label: String?, zone: ZoneId) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(10.dp).clip(CircleShape).background(MettleColors.Ink))
         Column(Modifier.weight(1f).padding(start = 12.dp)) {
-            Text(label ?: "Stay", style = MaterialTheme.typography.titleSmall)
+            Text(label ?: "Unnamed place", style = MaterialTheme.typography.titleSmall)
             Text("${Instant.ofEpochMilli(s.startMs).atZone(zone).format(f)} – ${Instant.ofEpochMilli(s.endMs).atZone(zone).format(f)}",
                 style = MettleType.Label, color = MettleColors.Sub)
         }
         Text(Fmt.hoursMinutes((s.endMs - s.startMs) / 1000) + " h", style = MaterialTheme.typography.titleSmall)
+    }
+}
+
+/** That day's totals from the phone's own records (Day tab only). */
+@Composable
+private fun DayTotals(db: app.mettle.data.db.MettleDatabase, day: String) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val minutes by db.day().minutes(day).collectAsState(emptyList())
+    val s = remember(minutes) { app.mettle.tracking.DayMath.summary(minutes, app.mettle.sync.ProfileCache.body(ctx)) }
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        app.mettle.ui.components.Stat("Steps", "%,d".format(s.steps), Modifier.weight(1f))
+        app.mettle.ui.components.Stat("Active", "${s.activeMin}", Modifier.weight(1f), unit = "min")
+        app.mettle.ui.components.Stat("Sitting", Fmt.hoursMinutes(s.sittingMin * 60L), Modifier.weight(1f), unit = "h")
+        app.mettle.ui.components.Stat("Floors", "${s.floorsUp}", Modifier.weight(1f))
     }
 }

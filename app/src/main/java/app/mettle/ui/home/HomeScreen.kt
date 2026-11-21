@@ -1,243 +1,155 @@
 package app.mettle.ui.home
 
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import app.mettle.data.db.ActivityEntity
 import app.mettle.data.db.ActivityType
 import app.mettle.data.db.MettleDatabase
-import app.mettle.data.db.PeriodTotals
+import app.mettle.tracking.TrackingService
 import app.mettle.ui.Fmt
+import app.mettle.ui.components.EmptyState
+import app.mettle.ui.components.RouteSketch
 import app.mettle.ui.components.Section
+import app.mettle.ui.components.Space
 import app.mettle.ui.components.Stat
 import app.mettle.ui.components.TopBar
 import app.mettle.ui.theme.MettleColors
+import app.mettle.ui.theme.MettleIcons
 import app.mettle.ui.theme.MettleType
-import java.time.DayOfWeek
+import app.mettle.ui.tracking.setupStatus
+import app.mettle.workout.Polyline
+import app.mettle.workout.WorkoutService
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.time.temporal.TemporalAdjusters
-
-private const val DEFAULT_KM_GOAL = 25_000L
-private const val DEFAULT_FLOORS_GOAL = 200L
 
 @Composable
-fun HomeScreen(db: MettleDatabase, onRecord: () -> Unit, onProgress: () -> Unit, onSetup: () -> Unit, onReplay: () -> Unit, onSafety: () -> Unit, onHealth: () -> Unit, onOpen: (String) -> Unit, onResumeSave: () -> Unit) {
-    val ctx = androidx.compose.ui.platform.LocalContext.current
-    var trackingOn by remember { androidx.compose.runtime.mutableStateOf(false) }
-    androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
-        trackingOn = app.mettle.tracking.TrackingService.isEnabled(ctx) && app.mettle.ui.tracking.setupStatus(ctx).essentials
+fun HomeScreen(
+    db: MettleDatabase, onRecord: () -> Unit, onSetup: () -> Unit, onDay: () -> Unit, onSafety: () -> Unit, onHealth: () -> Unit,
+    onOpen: (String) -> Unit, onResumeSave: () -> Unit, onLiveWorkout: () -> Unit,
+) {
+    val ctx = LocalContext.current
+    val zone = remember { ZoneId.systemDefault() }
+    var trackingOn by remember { mutableStateOf(false) }
+    var unsaved by remember { mutableStateOf(false) }
+    LifecycleResumeEffect(Unit) {
+        trackingOn = TrackingService.isEnabled(ctx) && setupStatus(ctx).essentials
+        unsaved = WorkoutService.unfinished(ctx) != null
         onPauseOrDispose { }
     }
-    val zone = remember { ZoneId.systemDefault() }
-    val weekStart = remember { LocalDate.now(zone).with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)) }
-    val from = remember { weekStart.atStartOfDay(zone).toInstant().toEpochMilli() }
-    val to = remember { weekStart.plusDays(7).atStartOfDay(zone).toInstant().toEpochMilli() }
-    val totals by db.activities().totals(from, to).collectAsState(PeriodTotals(0, 0, 0.0, 0, 0))
-    val week by db.activities().between(from, to).collectAsState(emptyList())
+    val live by WorkoutService.live.collectAsState()
     val recent by db.activities().recent().collectAsState(emptyList())
-    val group by androidx.compose.runtime.produceState(emptyList<FeedItem>()) { value = loadGroupFeed() }
+    val group by produceState(emptyList<FeedItem>()) { value = loadGroupFeed() }
 
     Column(Modifier.fillMaxSize().background(MettleColors.Band)) {
         TopBar("METTLE", wordmark = true) {
-            androidx.compose.material3.TextButton(onClick = onSafety) { Text("Safety · SOS", color = androidx.compose.ui.graphics.Color(0xFFDC2626)) }
+            IconButton(onClick = onSafety, modifier = Modifier.heightIn(min = 48.dp)) {
+                Icon(MettleIcons.Shield, contentDescription = "Safety and SOS", tint = SOS_RED)
+            }
         }
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
-            item { Spacer(Modifier.height(0.dp)) }
-            val live = app.mettle.workout.WorkoutService.live.value
-            if (live.recording) item { Banner("Workout in progress — tap to return", onRecord) }
-            else if (app.mettle.workout.WorkoutService.unfinished(ctx) != null) item { Banner("You have an unsaved workout — tap to save it", onResumeSave) }
+        LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+            if (live.recording) item { Banner("Workout in progress · tap to return", onLiveWorkout) }
+            else if (unsaved) item { Banner("You have an unsaved workout · tap to save it", onResumeSave) }
+            item { TodayCard(db, trackingOn, onSetup, onDay) }
             item { ReadinessCard(onHealth) }
-            item { TodayCard(db, trackingOn, onSetup, onReplay) }
-            item { WeekCard(totals, week, weekStart, zone, onProgress) }
+            item { SectionHeader("Your activities") }
+            if (recent.isEmpty()) item {
+                Section { EmptyState("No workouts yet", "Record a run, walk, hike or stair session. It will show up here with its map, splits and records.", "Record a workout", onRecord) }
+            } else items(recent, key = { it.id }) { ActivityCard(it, zone) { onOpen(it.id) } }
             if (group.isNotEmpty()) {
-                item { Text("Your group", style = androidx.compose.material3.MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 16.dp, top = 8.dp)) }
+                item { SectionHeader("Your group") }
                 items(group, key = { "g" + it.id }) { GroupFeedCard(it) }
             }
-            if (recent.isEmpty()) {
-                item { EmptyFeed(onRecord) }
-            } else {
-                items(recent, key = { it.id }) { ActivityCard(it, zone, onOpen) }
-            }
-            item { Spacer(Modifier.height(8.dp)) }
+            item { Spacer(Modifier.height(Space.l)) }
         }
     }
 }
 
-@Composable
-private fun WeekCard(totals: PeriodTotals, week: List<ActivityEntity>, weekStart: LocalDate, zone: ZoneId, onProgress: () -> Unit) {
-    val distFrac = (totals.distanceM.toFloat() / DEFAULT_KM_GOAL).coerceIn(0f, 1f)
-    val floorFrac = (totals.floorsUp.toFloat() / DEFAULT_FLOORS_GOAL).coerceIn(0f, 1f)
-    val anim = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { anim.animateTo(1f, tween(1100, easing = FastOutSlowInEasing)) }
-
-    Section {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("Your week", style = androidx.compose.material3.MaterialTheme.typography.titleLarge)
-            Text("See progress", style = androidx.compose.material3.MaterialTheme.typography.titleSmall, color = MettleColors.Orange,
-                modifier = Modifier.clickable(onClick = onProgress).padding(vertical = 8.dp))
-        }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-            Box(Modifier.size(108.dp), contentAlignment = Alignment.Center) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val outer = 9.dp.toPx()
-                    val r1 = size.minDimension / 2 - outer / 2
-                    val r2 = r1 - 13.dp.toPx()
-                    fun ring(r: Float, frac: Float, color: Color) {
-                        val tl = Offset(center.x - r, center.y - r)
-                        drawArc(MettleColors.Band, -90f, 360f, false, tl, Size(r * 2, r * 2), style = Stroke(outer))
-                        drawArc(color, -90f, 360f * frac * anim.value, false, tl, Size(r * 2, r * 2), style = Stroke(outer, cap = StrokeCap.Round))
-                    }
-                    ring(r1, distFrac, MettleColors.Orange)
-                    ring(r2, floorFrac, MettleColors.Ink)
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(Fmt.hoursMinutes(totals.movingS), style = MettleType.StatMedium)
-                    Text("hours", style = MettleType.Label, color = MettleColors.Sub)
-                }
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                GoalLine("Distance goal", Fmt.km(totals.distanceM), "/ ${DEFAULT_KM_GOAL / 1000} km", MettleColors.Orange)
-                GoalLine("Floors goal", totals.floorsUp.toString(), "/ $DEFAULT_FLOORS_GOAL", MettleColors.Ink)
-            }
-        }
-        DayBars(week, weekStart, zone, anim.value)
-    }
-}
+val SOS_RED = androidx.compose.ui.graphics.Color(0xFFDC2626)
 
 @Composable
-private fun GoalLine(label: String, value: String, of: String, dot: Color) {
-    Column {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Box(Modifier.size(8.dp).clip(CircleShape).background(dot))
-            Text(label, style = MettleType.Label, color = MettleColors.Sub)
-        }
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(value, style = MettleType.StatMedium)
-            Text(" $of", style = androidx.compose.material3.MaterialTheme.typography.bodyMedium, color = MettleColors.Sub, modifier = Modifier.padding(bottom = 3.dp))
-        }
-    }
-}
-
-@Composable
-private fun DayBars(week: List<ActivityEntity>, weekStart: LocalDate, zone: ZoneId, grow: Float) {
-    val today = LocalDate.now(zone)
-    val byDay = (0..6).map { d ->
-        val day = weekStart.plusDays(d.toLong())
-        val acts = week.filter { Instant.ofEpochMilli(it.startedAt).atZone(zone).toLocalDate() == day }
-        Triple(day, acts.sumOf { it.distanceM }, acts.sumOf { it.floorsUp })
-    }
-    val maxKm = byDay.maxOf { it.second }.coerceAtLeast(1)
-    val maxFl = byDay.maxOf { it.third }.coerceAtLeast(1)
-    Row(Modifier.fillMaxWidth().height(70.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Bottom) {
-        byDay.forEach { (day, km, fl) ->
-            val (h, color) = when {
-                km > 0 -> (km.toFloat() / maxKm) to MettleColors.Orange
-                fl > 0 -> (fl.toFloat() / maxFl) to MettleColors.Ink
-                else -> 0f to MettleColors.Line
-            }
-            Column(Modifier.weight(1f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom) {
-                Box(Modifier.width(22.dp).height((4 + 46 * h * grow).dp).clip(RoundedCornerShape(5.dp)).background(color))
-                Spacer(Modifier.height(5.dp))
-                Text(day.dayOfWeek.name.take(1), style = MettleType.Label, color = if (day == today) MettleColors.Ink else MettleColors.Muted)
-            }
-        }
-    }
-}
-
-@Composable
-private fun EmptyFeed(onRecord: () -> Unit) {
-    Section {
-        Text("No workouts yet", style = androidx.compose.material3.MaterialTheme.typography.titleLarge)
-        Text("Record your first run, walk, hike or stair session and it will show up here with maps, splits and records.",
-            style = androidx.compose.material3.MaterialTheme.typography.bodyLarge, color = MettleColors.Ink2)
-        Button(onClick = onRecord, colors = ButtonDefaults.buttonColors(containerColor = MettleColors.Orange),
-            modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(26.dp)) {
-            Text("Start a workout", style = androidx.compose.material3.MaterialTheme.typography.labelLarge)
-        }
-    }
-}
-
-@Composable
-private fun ActivityCard(a: ActivityEntity, zone: ZoneId, onOpen: (String) -> Unit) {
-    val whenText = remember(a.startedAt) {
-        Instant.ofEpochMilli(a.startedAt).atZone(zone).format(DateTimeFormatter.ofPattern("EEE d MMM 'at' h:mm a"))
-    }
-    Section(Modifier.clickable { onOpen(a.id) }) {
-        Text(whenText, style = MettleType.Label, color = MettleColors.Sub)
-        Text(a.title, style = androidx.compose.material3.MaterialTheme.typography.headlineMedium)
-        Row(Modifier.fillMaxWidth()) {
-            if (a.type == ActivityType.STAIRS) {
-                Stat("Floors up", a.floorsUp.toString(), Modifier.weight(1f))
-                Stat("Floors down", a.floorsDown.toString(), Modifier.weight(1f))
-            } else {
-                Stat("Distance", Fmt.km2(a.distanceM.toLong()), Modifier.weight(1f), unit = "km")
-                Stat("Pace", Fmt.pace(a.avgPaceSKm), Modifier.weight(1f), unit = "/km")
-            }
-            Stat("Time", Fmt.duration(a.movingS.toLong()), Modifier.weight(1f))
-        }
-    }
+private fun SectionHeader(text: String) {
+    Text(text, style = MaterialTheme.typography.titleLarge, color = MettleColors.Ink,
+        modifier = Modifier.padding(start = Space.l, end = Space.l, top = Space.m).semantics { heading() })
 }
 
 @Composable
 private fun Banner(text: String, onClick: () -> Unit) {
-    Box(Modifier.fillMaxWidth().background(MettleColors.Orange).clickable(onClick = onClick).padding(16.dp)) {
-        Text(text, style = androidx.compose.material3.MaterialTheme.typography.titleSmall, color = MettleColors.Surface)
+    Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).background(MettleColors.Orange).clickable(role = Role.Button, onClick = onClick)
+        .padding(horizontal = Space.l, vertical = Space.m), verticalAlignment = Alignment.CenterVertically) {
+        Text(text, style = MaterialTheme.typography.titleSmall, color = MettleColors.Surface, modifier = Modifier.weight(1f))
+        Icon(MettleIcons.Chevron, contentDescription = null, tint = MettleColors.Surface)
+    }
+}
+
+@Composable
+private fun ActivityCard(a: ActivityEntity, zone: ZoneId, onOpen: () -> Unit) {
+    val whenText = remember(a.startedAt) { Instant.ofEpochMilli(a.startedAt).atZone(zone).format(DateTimeFormatter.ofPattern("EEE d MMM · h:mm a")) }
+    val route = remember(a.routePolyline) { a.routePolyline?.let { Polyline.decode(it) }.orEmpty() }
+    Section(Modifier.clickable(role = Role.Button, onClickLabel = "Open ${a.title}", onClick = onOpen)) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(whenText, style = MettleType.Label, color = MettleColors.Sub)
+            Text(a.title, style = MaterialTheme.typography.headlineMedium)
+        }
+        Row(Modifier.fillMaxWidth()) {
+            if (a.type == ActivityType.STAIRS) {
+                Stat("Floors up", a.floorsUp.toString(), Modifier.weight(1f))
+                Stat("Floors down", a.floorsDown.toString(), Modifier.weight(1f))
+                Stat("Time", Fmt.duration(a.elapsedS.toLong()), Modifier.weight(1f))
+            } else {
+                Stat("Distance", Fmt.km2(a.distanceM.toLong()), Modifier.weight(1f), unit = "km")
+                Stat("Pace", Fmt.pace(a.avgPaceSKm), Modifier.weight(1f), unit = "/km")
+                Stat("Time", Fmt.duration(a.movingS.toLong()), Modifier.weight(1f))
+            }
+        }
+        RouteSketch(route)
     }
 }
 
 /** Shown only when there is something to base readiness on. */
 @Composable
 private fun ReadinessCard(onHealth: () -> Unit) {
-    val ctx = androidx.compose.ui.platform.LocalContext.current
-    val r by androidx.compose.runtime.produceState<Int?>(null) { value = runCatching { app.mettle.health.HealthStore.readiness(ctx) }.getOrNull() }
+    val ctx = LocalContext.current
+    val r by produceState<Int?>(null) { value = runCatching { app.mettle.health.HealthStore.readiness(ctx) }.getOrNull() }
     val score = r ?: return
-    Section(Modifier.clickable(onClick = onHealth)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+    Section(Modifier.clickable(role = Role.Button, onClick = onHealth)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.l)) {
             Text("$score", style = MettleType.StatLarge, color = if (score >= 50) MettleColors.Good else MettleColors.Warn)
-            Column {
-                Text("Readiness", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
-                Text(app.mettle.ui.health.readinessWord(score), style = androidx.compose.material3.MaterialTheme.typography.bodyMedium, color = MettleColors.Ink2)
+            Column(Modifier.weight(1f)) {
+                Text("Readiness", style = MaterialTheme.typography.titleMedium)
+                Text(app.mettle.ui.health.readinessWord(score), style = MaterialTheme.typography.bodyMedium, color = MettleColors.Ink2)
             }
+            Icon(MettleIcons.Chevron, contentDescription = null, tint = MettleColors.Muted)
         }
     }
 }

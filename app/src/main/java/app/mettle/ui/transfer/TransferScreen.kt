@@ -53,7 +53,7 @@ fun TransferScreen(onBack: () -> Unit) {
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share"))
     }
     Column(Modifier.fillMaxSize().background(MettleColors.Band), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        TopBar("Import & export") { IconButton(onClick = onBack) { Icon(MettleIcons.Close, contentDescription = "Close") } }
+        TopBar("Import & export", onBack = onBack)
         Section {
             Text("Import", style = MaterialTheme.typography.titleLarge)
             Text("Choose .gpx files, or the whole Strava export .zip (Strava → Settings → My Account → Download your data). Imported workouts are private and get full analysis: splits, best efforts and records.",

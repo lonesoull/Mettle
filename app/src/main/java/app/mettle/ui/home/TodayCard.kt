@@ -33,6 +33,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import app.mettle.data.db.DayState
 import app.mettle.data.db.MettleDatabase
@@ -58,14 +60,14 @@ fun stateColor(s: DayState): Color = when (s) {
     DayState.UNKNOWN -> MettleColors.Line
 }
 
-private fun stateLabel(s: DayState) = when (s) {
+fun stateLabel(s: DayState) = when (s) {
     DayState.RUNNING -> "Running"; DayState.WALKING -> "Walking"; DayState.CYCLING -> "Cycling"
     DayState.VEHICLE -> "Vehicle"; DayState.STILL -> "Still"; DayState.UNKNOWN -> "Unknown"
     DayState.SITTING -> "Sitting"; DayState.STANDING -> "Standing"
 }
 
 @Composable
-fun TodayCard(db: MettleDatabase, trackingOn: Boolean, onSetup: () -> Unit, onReplay: () -> Unit) {
+fun TodayCard(db: MettleDatabase, trackingOn: Boolean, onSetup: () -> Unit, onDay: () -> Unit) {
     val context = LocalContext.current
     val zone = remember { ZoneId.systemDefault() }
     val today = remember { LocalDate.now(zone).toString() }
@@ -76,31 +78,14 @@ fun TodayCard(db: MettleDatabase, trackingOn: Boolean, onSetup: () -> Unit, onRe
     val segments = remember(minutes) { DayMath.segments(minutes) }
     val ring by animateFloatAsState((s.steps.toFloat() / goal).coerceIn(0f, 1f), tween(900), label = "steps")
 
-    Section {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Today", style = MaterialTheme.typography.titleLarge)
-                Text("Replay day ›", style = MaterialTheme.typography.titleSmall, color = MettleColors.Orange,
-                    modifier = Modifier.clickable(role = Role.Button, onClick = onReplay).padding(vertical = 6.dp))
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Box(Modifier.size(8.dp).clip(CircleShape).background(if (trackingOn) MettleColors.Good else MettleColors.Warn))
-                Text(if (trackingOn) "Tracking" else "Tracking off", style = MettleType.Label, color = MettleColors.Sub)
-            }
-        }
+    app.mettle.ui.components.Section(title = "Today", action = "Your day", onAction = onDay) {
         if (!trackingOn) {
-            Box(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(MettleColors.OrangeWash)
-                    .clickable(role = Role.Button, onClick = onSetup).padding(14.dp),
-            ) {
-                Column {
-                    Text("Set up all-day tracking", style = MaterialTheme.typography.titleMedium, color = MettleColors.OrangeDeep)
-                    Text("Steps, activity and your day's timeline. Takes a minute.", style = MaterialTheme.typography.bodyMedium, color = MettleColors.Ink2)
-                }
-            }
+            app.mettle.ui.components.EmptyState("All-day tracking is off",
+                "Turn it on to count steps, floors and active minutes, and to build your day's timeline.", "Set up all-day tracking", onSetup)
+            return@Section
         }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-            Box(Modifier.size(112.dp), contentAlignment = Alignment.Center) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+            Box(Modifier.size(116.dp).semantics(mergeDescendants = true) { contentDescription = "${s.steps} of $goal steps" }, contentAlignment = Alignment.Center) {
                 Canvas(Modifier.fillMaxSize()) {
                     val w = 10.dp.toPx(); val r = size.minDimension / 2 - w / 2
                     val tl = Offset(center.x - r, center.y - r)
@@ -109,35 +94,35 @@ fun TodayCard(db: MettleDatabase, trackingOn: Boolean, onSetup: () -> Unit, onRe
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(String.format(Locale.US, "%,d", s.steps), style = MettleType.StatMedium)
-                    Text(String.format(Locale.US, "of %,d", goal), style = MettleType.Label, color = MettleColors.Sub)
+                    Text(String.format(Locale.US, "of %,d steps", goal), style = MettleType.Label, color = MettleColors.Sub)
                 }
             }
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Mini("Distance", Fmt.km2(s.distanceM.toLong()) + " km")
                 Mini("Active", "${s.activeMin} min")
-                Mini("Calories", "${s.activeCalories} kcal")
-                if (s.floorsUp + s.floorsDown + s.liftTrips > 0) Mini("Floors", "▲${s.floorsUp} ▼${s.floorsDown}" + if (s.liftTrips > 0) " · lift ${s.liftTrips}" else "")
+                Mini(if (s.floorsUp + s.floorsDown > 0) "Floors" else "Calories",
+                    if (s.floorsUp + s.floorsDown > 0) "▲ ${s.floorsUp}  ▼ ${s.floorsDown}" else "${s.activeCalories} kcal")
             }
         }
-        // 24-hour timeline
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Canvas(Modifier.fillMaxWidth().height(18.dp).clip(RoundedCornerShape(5.dp)).background(MettleColors.Band)) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Canvas(Modifier.fillMaxWidth().height(14.dp).clip(RoundedCornerShape(7.dp)).background(MettleColors.Band)
+                .semantics { contentDescription = "Timeline of your day" }) {
                 val perMin = size.width / 1440f
                 segments.forEach { seg ->
-                    drawRoundRect(stateColor(seg.state), Offset(seg.startMinute * perMin, 0f),
-                        Size(((seg.endMinute - seg.startMinute) * perMin).coerceAtLeast(1.5f), size.height), CornerRadius(2f))
+                    drawRect(stateColor(seg.state), Offset(seg.startMinute * perMin, 0f),
+                        Size(((seg.endMinute - seg.startMinute) * perMin).coerceAtLeast(1.5f), size.height))
                 }
                 val now = LocalTime.now(zone).let { it.hour * 60 + it.minute } * perMin
-                drawLine(MettleColors.Ink, Offset(now, 0f), Offset(now, size.height), strokeWidth = 2f)
+                drawLine(MettleColors.Ink, Offset(now, 0f), Offset(now, size.height), strokeWidth = 3f)
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                listOf("00", "06", "12", "18", "24").forEach { Text(it, style = MettleType.Label, color = MettleColors.Muted) }
+                listOf("12 am", "6 am", "12 pm", "6 pm", "12 am").forEach { Text(it, style = MettleType.Label, color = MettleColors.Muted) }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 4.dp)) {
-                listOf(DayState.SITTING, DayState.STANDING, DayState.WALKING, DayState.RUNNING, DayState.VEHICLE).forEach { st ->
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Box(Modifier.size(8.dp).clip(CircleShape).background(stateColor(st)))
-                        Text(stateLabel(st), style = MettleType.Label, color = MettleColors.Sub)
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                listOf(DayState.SITTING, DayState.WALKING, DayState.RUNNING, DayState.VEHICLE).forEach { st ->
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Box(Modifier.size(10.dp).clip(CircleShape).background(stateColor(st)))
+                        Text(stateLabel(st), style = MettleType.Label, color = MettleColors.Ink2)
                     }
                 }
             }

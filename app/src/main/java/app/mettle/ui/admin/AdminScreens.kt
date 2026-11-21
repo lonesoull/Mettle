@@ -1,5 +1,10 @@
 package app.mettle.ui.admin
 
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import com.google.maps.android.compose.rememberMarkerState
+import androidx.compose.runtime.key
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -137,19 +142,26 @@ fun AdminScreen(onMember: (String, String) -> Unit, onBack: () -> Unit) {
             camera.move(CameraUpdateFactory.newLatLngBounds(b.build(), 120))
         } else located.firstOrNull()?.let { camera.move(CameraUpdateFactory.newLatLngZoom(LatLng(it.lat!!, it.lon!!), 14f)) }
     }
-    LazyColumn(Modifier.fillMaxSize().background(MettleColors.Band), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        item {
-            Column(Modifier.background(MettleColors.Surface)) {
-                TopBar("Admin · group") { IconButton(onClick = onBack) { Icon(MettleIcons.Close, contentDescription = "Close") } }
-                GoogleMap(Modifier.fillMaxWidth().height(300.dp), cameraPositionState = camera, uiSettings = MapUiSettings(zoomControlsEnabled = false)) {
-                    located.forEach { m ->
-                        Marker(state = MarkerState(LatLng(m.lat!!, m.lon!!)), title = m.name,
+    // Map is pinned above the list (not inside it) so scrolling never re-creates or fights the map.
+    Column(Modifier.fillMaxSize().background(MettleColors.Band)) {
+    Column(Modifier.background(MettleColors.Surface)) {
+        TopBar("Admin · group", onBack = onBack)
+        if (app.mettle.ui.workout.MapsConfig.enabled) {
+            GoogleMap(Modifier.fillMaxWidth().height(260.dp).semantics { contentDescription = "Map of group members" },
+                cameraPositionState = camera,
+                uiSettings = MapUiSettings(zoomControlsEnabled = false, mapToolbarEnabled = false, rotationGesturesEnabled = false, tiltGesturesEnabled = false)) {
+                located.forEach { m ->
+                    key(m.userId) {
+                        Marker(state = rememberMarkerState(position = LatLng(m.lat!!, m.lon!!)).also { it.position = LatLng(m.lat!!, m.lon!!) }, title = m.name,
                             snippet = "${m.state ?: "–"} · ${m.battery?.let { "$it%" } ?: ""} · ${ago(m.updatedAt)}")
                     }
                 }
-                error?.let { Text(it, style = MettleType.Label, color = MettleColors.WarnText, modifier = Modifier.padding(12.dp)) }
             }
-        }
+        } else Box(Modifier.fillMaxWidth().height(260.dp).background(MettleColors.Band))
+        error?.let { Text(it, style = MettleType.Label, color = MettleColors.WarnText, modifier = Modifier.padding(12.dp)) }
+    }
+    LazyColumn(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item { Spacer(Modifier.height(0.dp)) }
         if (alerts.isNotEmpty()) item {
             Section {
                 Text("Alerts · last 2 days", style = MaterialTheme.typography.titleLarge)
@@ -192,6 +204,7 @@ fun AdminScreen(onMember: (String, String) -> Unit, onBack: () -> Unit) {
             }
         }
     }
+    }
 }
 
 /** One member: today, recent workouts, tracking gaps, phone capabilities, day replay. */
@@ -213,7 +226,7 @@ fun MemberScreen(userId: String, name: String, onReplay: () -> Unit, onBack: () 
     LazyColumn(Modifier.fillMaxSize().background(MettleColors.Band), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             Column(Modifier.background(MettleColors.Surface)) {
-                TopBar(name) { IconButton(onClick = onBack) { Icon(MettleIcons.Close, contentDescription = "Back") } }
+                TopBar(name, onBack = onBack)
                 TextButton(onClick = onReplay, modifier = Modifier.padding(horizontal = 8.dp)) { Text("Replay $name's day ›", color = MettleColors.Orange) }
             }
         }

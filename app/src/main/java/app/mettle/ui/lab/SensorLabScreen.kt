@@ -104,7 +104,7 @@ fun SensorLabScreen(onBack: () -> Unit) {
     }
 
     Column(Modifier.fillMaxSize().background(MettleColors.Surface)) {
-        TopBar("Sensor Lab")
+        TopBar("Sensor Lab", onBack = onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Helps Mettle learn stairs on your phone. Keep the phone where you normally carry it, press Start, then tap what you're doing each time it changes. 10–15 minutes of mixed stairs is ideal.",
                 style = MaterialTheme.typography.bodyLarge, color = MettleColors.Ink2)

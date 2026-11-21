@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -76,33 +77,23 @@ fun GroupFeedCard(item: FeedItem) {
             else { Stat("Distance", Fmt.km2(item.distanceM.toLong()), Modifier.weight(1f), unit = "km"); Stat("Pace", Fmt.pace(item.pace), Modifier.weight(1f), unit = "/km") }
             Stat("Time", Fmt.duration(item.movingS.toLong()), Modifier.weight(1f))
         }
-        if (pts.size >= 2) {
-            val minLat = pts.minOf { it.first }; val maxLat = pts.maxOf { it.first }; val minLon = pts.minOf { it.second }; val maxLon = pts.maxOf { it.second }
-            Canvas(Modifier.fillMaxWidth().height(120.dp)) {
-                val sx = size.width / (maxLon - minLon).coerceAtLeast(1e-6); val sy = size.height / (maxLat - minLat).coerceAtLeast(1e-6)
-                val s = minOf(sx, sy) * 0.9; val ox = (size.width - (maxLon - minLon) * s) / 2; val oy = (size.height - (maxLat - minLat) * s) / 2
-                val path = Path()
-                pts.forEachIndexed { i, (la, lo) ->
-                    val x = (ox + (lo - minLon) * s).toFloat(); val y = (size.height - oy - (la - minLat) * s).toFloat()
-                    if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        app.mettle.ui.components.RouteSketch(pts)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.material3.TextButton(onClick = {
+                val was = mine; mine = !was; count += if (was) -1 else 1
+                scope.launch {
+                    runCatching {
+                        val me = Backend.client.auth.currentUserOrNull()!!.id
+                        if (was) Backend.client.from("kudos").delete { filter { eq("activity_id", item.id); eq("user_id", me) } }
+                        else Backend.client.from("kudos").insert(KudosRow(item.id, me))
+                    }.onFailure { mine = was; count += if (was) 1 else -1 }
                 }
-                drawPath(path, MettleColors.Orange, style = Stroke(6f, cap = StrokeCap.Round))
+            }) {
+                androidx.compose.material3.Icon(app.mettle.ui.theme.MettleIcons.Heart, contentDescription = null,
+                    tint = if (mine) MettleColors.Orange else MettleColors.Ink2, modifier = Modifier.padding(end = 6.dp))
+                Text(if (mine) "Kudos given" else "Give kudos", style = MaterialTheme.typography.labelLarge, color = if (mine) MettleColors.Orange else MettleColors.Ink2)
             }
-        }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(if (mine) "👍 Kudos given" else "👍 Give kudos", style = MaterialTheme.typography.titleSmall,
-                color = if (mine) MettleColors.Orange else MettleColors.Ink2,
-                modifier = Modifier.clickable {
-                    val was = mine; mine = !was; count += if (was) -1 else 1
-                    scope.launch {
-                        runCatching {
-                            val me = Backend.client.auth.currentUserOrNull()!!.id
-                            if (was) Backend.client.from("kudos").delete { filter { eq("activity_id", item.id); eq("user_id", me) } }
-                            else Backend.client.from("kudos").insert(KudosRow(item.id, me))
-                        }.onFailure { mine = was; count += if (was) 1 else -1 }
-                    }
-                })
-            if (count > 0) Text("$count", style = MettleType.Label, color = MettleColors.Sub)
+            if (count > 0) Text("$count kudos", style = MettleType.Label, color = MettleColors.Sub)
         }
     }
 }

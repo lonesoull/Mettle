@@ -1,5 +1,9 @@
 package app.mettle.ui.health
 
+import androidx.compose.foundation.layout.Spacer
+import app.mettle.ui.components.ListRow
+import app.mettle.ui.components.SecondaryButton
+import app.mettle.ui.components.PrimaryButton
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -81,49 +85,59 @@ fun HealthScreen(onFingertip: () -> Unit, onBack: () -> Unit) {
     DisposableEffect(Unit) { onDispose { HeartRateBle.stopScan(c) } }
 
     Column(Modifier.fillMaxSize().background(MettleColors.Band)) {
-        TopBar("Health") { IconButton(onClick = onBack) { Icon(MettleIcons.Close, contentDescription = "Close") } }
+        TopBar("Health", onBack = onBack)
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            readiness?.let { r ->
-                Section {
-                    Text("Readiness", style = MaterialTheme.typography.titleLarge)
+            Section(title = "Readiness") {
+                val r = readiness
+                if (r != null) {
                     Row(verticalAlignment = androidx.compose.ui.Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("$r", style = MettleType.Hero, color = if (r >= 50) MettleColors.Good else MettleColors.Warn)
                         Text(readinessWord(r), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 12.dp))
                     }
                     Text("From your morning heart rate vs your normal, last night's sleep (if a device provides it) and recent training load.",
                         style = MaterialTheme.typography.bodyMedium, color = MettleColors.Ink2)
-                }
-            }
-            if (pm.hasSystemFeature(PackageManager.FEATURE_CAMERA_FLASH)) Section {
-                Text("Fingertip heart rate", style = MaterialTheme.typography.titleLarge)
-                val last = HealthStore.spotChecks(c).lastOrNull()
-                Text(last?.let { "Last: ${it.bpm} bpm" } ?: "Measure your resting heart rate with the camera. Best done each morning before getting up.",
+                } else Text("Your readiness score appears after a few morning heart-rate checks, or once a watch shares sleep and resting heart rate.",
                     style = MaterialTheme.typography.bodyMedium, color = MettleColors.Ink2)
-                TextButton(onClick = onFingertip) { Text("Measure now", color = MettleColors.Orange) }
             }
-            if (pm.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) Section {
-                Text("Heart-rate strap or watch", style = MaterialTheme.typography.titleLarge)
-                if (strap != null) {
-                    Text("${strap!!.name}" + (bpm?.let { " · $it bpm now" } ?: " · connects during workouts"), style = MaterialTheme.typography.bodyLarge)
-                    TextButton(onClick = { HeartRateBle.save(c, null); HeartRateBle.disconnect(); strap = null }) { Text("Forget", color = MettleColors.Sub) }
+            Section(title = "Fingertip heart rate") {
+                if (pm.hasSystemFeature(PackageManager.FEATURE_CAMERA_FLASH)) {
+                    val last = HealthStore.spotChecks(c).lastOrNull()
+                    Text(last?.let { "Last check: ${it.bpm} bpm" } ?: "Measure your resting heart rate with the camera. Best done each morning before getting up.",
+                        style = MaterialTheme.typography.bodyMedium, color = MettleColors.Ink2)
+                    PrimaryButton("Measure now", onClick = onFingertip)
+                } else Text("This phone has no camera flash, so fingertip measurement isn't available. Use a strap or watch below.",
+                    style = MaterialTheme.typography.bodyMedium, color = MettleColors.Ink2)
+            }
+            Section(title = "Heart-rate strap or watch") {
+                if (!pm.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) {
+                    Text("This phone doesn't support Bluetooth heart-rate devices.", style = MaterialTheme.typography.bodyMedium, color = MettleColors.Ink2)
+                } else if (strap != null) {
+                    ListRow(title = strap!!.name, subtitle = bpm?.let { "$it bpm now" } ?: "Connects automatically during workouts", icon = MettleIcons.Heart, iconTint = MettleColors.Orange)
+                    SecondaryButton("Forget this device") { HeartRateBle.save(c, null); HeartRateBle.disconnect(); strap = null }
                 } else {
                     Text("Pair a Bluetooth chest strap, or a watch in heart-rate broadcast mode, to see heart rate during workouts.",
                         style = MaterialTheme.typography.bodyMedium, color = MettleColors.Ink2)
-                    TextButton(onClick = {
+                    SecondaryButton(if (scanning) "Searching… wear the strap" else "Find my strap") {
                         scanning = true
                         if (HeartRateBle.hasPermission(c)) HeartRateBle.scan(c)
                         else if (Build.VERSION.SDK_INT >= 31) bleAsk.launch(arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT))
-                    }) { Text(if (scanning) "Searching… (wear the strap)" else "Find my strap", color = MettleColors.Orange) }
+                    }
                     found.forEach { f ->
-                        Text("• ${f.name}", style = MaterialTheme.typography.titleSmall, modifier = Modifier.clickable {
+                        ListRow(title = f.name, subtitle = "Tap to pair", icon = MettleIcons.Heart, iconTint = MettleColors.Orange, onClick = {
                             HeartRateBle.stopScan(c); HeartRateBle.save(c, f); strap = f; HeartRateBle.connect(c); scanning = false; SyncWorker.schedule(c)
-                        }.padding(vertical = 8.dp))
+                        })
                     }
                 }
             }
-            if (HealthStore.healthConnectAvailable(c)) Section {
-                Text("Sleep and watch data", style = MaterialTheme.typography.titleLarge)
-                if (hcGranted) {
+            Section(title = "Sleep and watch data") {
+                if (!HealthStore.healthConnectAvailable(c)) {
+                    Text("Sleep comes from Health Connect, which isn't installed or set up on this phone. Install it, then let your watch's app write to it.",
+                        style = MaterialTheme.typography.bodyMedium, color = MettleColors.Ink2)
+                    SecondaryButton("Get Health Connect") {
+                        runCatching { c.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
+                            android.net.Uri.parse("market://details?id=com.google.android.apps.healthdata")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    }
+                } else if (hcGranted) {
                     Text(lastSleep?.let { s -> "Last night: ${s.asleepMin / 60} h ${s.asleepMin % 60} min asleep" +
                         (if (s.deepMin + s.remMin > 0) " · deep ${s.deepMin} min · REM ${s.remMin} min" else "") }
                         ?: "Connected. Sleep appears here when your watch's app writes it to Health Connect.",
@@ -131,16 +145,17 @@ fun HealthScreen(onFingertip: () -> Unit, onBack: () -> Unit) {
                 } else {
                     Text("If your watch's app (Samsung Health, Fitbit, Zepp, Mi Fitness…) writes to Health Connect, Mettle can read sleep and resting heart rate.",
                         style = MaterialTheme.typography.bodyMedium, color = MettleColors.Ink2)
-                    TextButton(onClick = { hcAsk.launch(HealthStore.permissions) }) { Text("Connect Health Connect", color = MettleColors.Orange) }
+                    PrimaryButton("Connect Health Connect") { hcAsk.launch(HealthStore.permissions) }
                 }
             }
+            Spacer(Modifier.height(16.dp))
         }
     }
 }
 
 /** Fingertip heart-rate check: finger over the camera and flash for 30 seconds. */
 @Composable
-fun FingertipScreen(onDone: () -> Unit) {
+fun FingertipScreen(onDone: () -> Unit, onBack: () -> Unit = onDone) {
     val c = LocalContext.current
     val owner = LocalLifecycleOwner.current
     var camOk by remember { mutableStateOf(ContextCompat.checkSelfPermission(c, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) }
@@ -190,7 +205,7 @@ fun FingertipScreen(onDone: () -> Unit) {
     }
 
     Column(Modifier.fillMaxSize().background(MettleColors.Surface)) {
-        TopBar("Fingertip heart rate")
+        TopBar("Fingertip heart rate", onBack = onBack)
         Column(Modifier.weight(1f).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text(when {
                 result != null -> "Your heart rate"

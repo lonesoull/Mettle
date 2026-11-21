@@ -115,6 +115,7 @@ fun BuildingPicker(db: MettleDatabase, selectedId: String?, onSelect: (String?) 
 /** Climb exactly one floor while Mettle counts your steps (and measures the height on barometer phones). */
 @Composable
 fun CalibrationScreen(db: MettleDatabase, placeId: String, onDone: () -> Unit) {
+    val onBack = onDone
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var running by remember { mutableStateOf(false) }
@@ -139,7 +140,7 @@ fun CalibrationScreen(db: MettleDatabase, placeId: String, onDone: () -> Unit) {
         onDispose { sm.unregisterListener(listener) }
     }
     Column(Modifier.fillMaxSize().background(MettleColors.Surface)) {
-        TopBar("Calibrate one floor")
+        TopBar("Calibrate one floor", onBack = onBack)
         Column(Modifier.weight(1f).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text(if (!running) "1. Stand at the bottom of a flight of stairs.\n2. Tap Start.\n3. Climb exactly ONE floor at your normal pace.\n4. Tap Done at the next floor's landing."
                 else "Climb one floor, then tap Done.", style = MaterialTheme.typography.bodyLarge, color = MettleColors.Ink2)

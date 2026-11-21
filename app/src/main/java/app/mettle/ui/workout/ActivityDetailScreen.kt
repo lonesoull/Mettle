@@ -70,9 +70,9 @@ fun ActivityDetailScreen(db: MettleDatabase, activityId: String, onBack: () -> U
     LazyColumn(Modifier.fillMaxSize().background(MettleColors.Band), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             Column(Modifier.background(MettleColors.Surface)) {
-                TopBar(act.title) { IconButton(onClick = onBack) { Icon(MettleIcons.Close, contentDescription = "Back") } }
+                TopBar(act.title, onBack = onBack)
                 val route = remember(act.routePolyline) { act.routePolyline?.let { Polyline.decode(it) }.orEmpty() }
-                if (route.size >= 2) RouteMap(route, follow = false, interactive = false, modifier = Modifier.fillMaxWidth().height(300.dp))
+                if (route.size >= 2) RouteMap(route, follow = false, interactive = false, lite = true, modifier = Modifier.fillMaxWidth().height(260.dp))
                 Header(act)
             }
         }
@@ -159,15 +159,23 @@ private fun Header(a: ActivityEntity) {
             Column(Modifier.weight(1f)) { Text("Pace /km", style = MettleType.Label, color = MettleColors.Sub); Text(Fmt.pace(a.avgPaceSKm), style = MettleType.StatLarge) }
             Column(Modifier.weight(1f)) { Text("Time", style = MettleType.Label, color = MettleColors.Sub); Text(Fmt.duration(a.movingS.toLong()), style = MettleType.StatLarge) }
         }
-        Row(Modifier.fillMaxWidth()) {
-            Stat("GAP", Fmt.pace(a.gapSKm), Modifier.weight(1f), unit = "/km")
-            Stat("Climb", "${a.elevGainM.toInt()}", Modifier.weight(1f), unit = "m")
-            Stat("Elapsed", Fmt.duration(a.elapsedS.toLong()), Modifier.weight(1f))
+        // Only stats that mean something for this kind of workout, and only when measured.
+        val stairs = a.type == app.mettle.data.db.ActivityType.STAIRS
+        val tiles = buildList<Triple<String, String, String?>> {
+            if (!stairs && a.gapSKm != null) add(Triple("GAP", Fmt.pace(a.gapSKm), "/km"))
+            add(Triple("Climb", "${a.elevGainM.toInt()}", "m"))
+            if (stairs) add(Triple("Moving", Fmt.duration(a.movingS.toLong()), null)) else add(Triple("Elapsed", Fmt.duration(a.elapsedS.toLong()), null))
+            if (stairs && a.movingS > 0) add(Triple("Vertical", "${(a.elevGainM * 3600 / a.movingS).toInt()}", "m/h"))
+            if (!stairs && a.avgCadenceSpm != null) add(Triple("Cadence", "${a.avgCadenceSpm}", "spm"))
+            a.avgHr?.let { add(Triple("Avg HR", "$it", "bpm")) }
+            a.calories?.let { add(Triple("Calories", "$it", null)) }
+            a.rpe?.let { add(Triple("Effort", "$it/10", null)) }
         }
-        Row(Modifier.fillMaxWidth()) {
-            Stat("Cadence", a.avgCadenceSpm?.toString() ?: "–", Modifier.weight(1f), unit = "spm")
-            Stat("Calories", a.calories?.toString() ?: "–", Modifier.weight(1f))
-            Stat("Effort", a.rpe?.let { "$it/10" } ?: "–", Modifier.weight(1f))
+        tiles.chunked(3).forEach { row ->
+            Row(Modifier.fillMaxWidth()) {
+                row.forEach { (label, value, unit) -> Stat(label, value, Modifier.weight(1f), unit = unit) }
+                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
         }
     }
 }

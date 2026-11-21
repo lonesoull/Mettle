@@ -49,10 +49,8 @@ import java.time.ZoneId
 import java.time.temporal.TemporalAdjusters
 
 @Composable
-fun ProgressScreen(db: MettleDatabase, profile: Profile, onSensorLab: () -> Unit = {}, onAdmin: () -> Unit = {}, onHealth: () -> Unit = {},
-                   onImport: () -> Unit = {}) {
+fun ProgressScreen(db: MettleDatabase) {
     val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
     val zone = remember { ZoneId.systemDefault() }
     val today = remember { LocalDate.now(zone) }
     val start = remember { today.minusDays(83) }
@@ -71,6 +69,31 @@ fun ProgressScreen(db: MettleDatabase, profile: Profile, onSensorLab: () -> Unit
     LazyColumn(Modifier.fillMaxSize().background(MettleColors.Band), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item { TopBar("Progress") }
         item {
+            val monday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+            val week = acts.filter { dayOf(it.startedAt) >= monday }
+            val weekDays by db.day().dailyTotals().collectAsState(emptyList())
+            val weekSteps = weekDays.filter { LocalDate.parse(it.day) >= monday }.sumOf { it.steps }
+            Section(title = "This week") {
+                Row(Modifier.fillMaxWidth()) {
+                    app.mettle.ui.components.StatBig("Distance", Fmt.km(week.filter { it.type != ActivityType.STAIRS }.sumOf { it.distanceM }.toLong()), Modifier.weight(1f), unit = "km")
+                    app.mettle.ui.components.StatBig("Time", Fmt.hoursMinutes(week.sumOf { it.movingS }.toLong()), Modifier.weight(1f), unit = "h")
+                    app.mettle.ui.components.StatBig("Steps", "%,d".format(weekSteps), Modifier.weight(1f))
+                }
+                Row(Modifier.fillMaxWidth().height(64.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Bottom) {
+                    val perDay = (0..6).map { d -> monday.plusDays(d.toLong()).let { day -> acts.filter { dayOf(it.startedAt) == day }.sumOf { it.movingS } } }
+                    val mx = perDay.maxOrNull()?.coerceAtLeast(1) ?: 1
+                    perDay.forEachIndexed { i, v ->
+                        Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Box(Modifier.fillMaxWidth().height((3 + 40 * v / mx).dp).clip(RoundedCornerShape(4.dp))
+                                .background(if (v > 0) MettleColors.Orange else MettleColors.Line))
+                            Text(monday.plusDays(i.toLong()).dayOfWeek.name.take(1), style = MettleType.Label,
+                                color = if (monday.plusDays(i.toLong()) == today) MettleColors.Ink else MettleColors.Muted, modifier = Modifier.padding(top = 4.dp))
+                        }
+                    }
+                }
+            }
+        }
+        item {
             Section {
                 Text("Fitness & freshness", style = MaterialTheme.typography.titleLarge)
                 val last = series.lastOrNull() ?: Triple(0.0, 0.0, 0.0)
@@ -79,7 +102,7 @@ fun ProgressScreen(db: MettleDatabase, profile: Profile, onSensorLab: () -> Unit
                     Stat("Fatigue", "${last.second.toInt()}", Modifier.weight(1f))
                     Stat("Form", (if (last.third >= 0) "+" else "") + last.third.toInt(), Modifier.weight(1f))
                 }
-                if (acts.isEmpty()) Text("Record workouts and rate how hard they felt; this chart builds from that.", style = MaterialTheme.typography.bodyMedium, color = MettleColors.Sub)
+                if (acts.isEmpty()) Text("Record workouts and rate how hard they felt. This chart builds from that.", style = MaterialTheme.typography.bodyMedium, color = MettleColors.Sub)
                 else {
                     val hi = series.maxOf { maxOf(it.first, it.second) }.coerceAtLeast(10.0)
                     Canvas(Modifier.fillMaxWidth().height(130.dp)) {
@@ -162,18 +185,6 @@ fun ProgressScreen(db: MettleDatabase, profile: Profile, onSensorLab: () -> Unit
                     }
                     Text("Now ${cad.last().toInt()} · a steady or rising line is a good sign; a sudden drop can mean fatigue or a niggle.", style = MettleType.Label, color = MettleColors.Sub)
                 }
-            }
-        }
-        item {
-            Section {
-                Text(if (profile.isAdmin) "${profile.displayName} · Admin" else profile.displayName, style = MaterialTheme.typography.titleLarge)
-                Text("Height ${profile.heightCm} cm" + (profile.weightKg?.let { " · Weight $it kg" } ?: "") + " · Step goal ${profile.stepGoal}",
-                    style = MaterialTheme.typography.bodyLarge, color = MettleColors.Ink2)
-                if (profile.isAdmin) TextButton(onClick = onAdmin) { Text("Admin dashboard", color = MettleColors.Orange) }
-                TextButton(onClick = onHealth) { Text("Health & devices", color = MettleColors.Orange) }
-                TextButton(onClick = onImport) { Text("Import & export (GPX, Strava)", color = MettleColors.Orange) }
-                TextButton(onClick = onSensorLab) { Text("Sensor Lab (improve stair detection)", color = MettleColors.Orange) }
-                TextButton(onClick = { ProfileCache.clear(ctx); scope.launch { runCatching { Backend.signOut() } } }) { Text("Sign out", color = MettleColors.Sub) }
             }
         }
     }

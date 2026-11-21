@@ -61,15 +61,18 @@ private val fieldColors @Composable get() = OutlinedTextFieldDefaults.colors(
 )
 
 @Composable
-private fun AuthFrame(content: @Composable ColumnScope.() -> Unit) {
+private fun AuthFrame(onBack: (() -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxSize().background(MettleColors.Surface)) {
+    if (onBack != null) app.mettle.ui.components.TopBar("Profile", onBack = onBack)
     Column(
-        Modifier.fillMaxSize().background(MettleColors.Surface).statusBarsPadding().imePadding()
+        Modifier.fillMaxSize().then(if (onBack == null) Modifier.statusBarsPadding() else Modifier).imePadding()
             .verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Spacer(Modifier.height(32.dp))
-        Text("METTLE", fontFamily = Inter, fontWeight = FontWeight.ExtraBold, fontStyle = FontStyle.Italic, fontSize = 34.sp, letterSpacing = (-0.8).sp)
+        if (onBack == null) Spacer(Modifier.height(32.dp))
+        if (onBack == null) Text("METTLE", fontFamily = Inter, fontWeight = FontWeight.ExtraBold, fontStyle = FontStyle.Italic, fontSize = 34.sp, letterSpacing = (-0.8).sp)
         content()
+    }
     }
 }
 
@@ -137,7 +140,7 @@ fun SignInScreen() {
 }
 
 @Composable
-fun ProfileSetupScreen(userId: String, existing: Profile?, onDone: (Profile) -> Unit) {
+fun ProfileSetupScreen(userId: String, existing: Profile?, onDone: (Profile) -> Unit, onBack: (() -> Unit)? = null) {
     val scope = rememberCoroutineScope()
     var name by rememberSaveable { mutableStateOf(existing?.displayName.orEmpty()) }
     var height by rememberSaveable { mutableStateOf(existing?.heightCm?.toString().orEmpty()) }
@@ -151,8 +154,8 @@ fun ProfileSetupScreen(userId: String, existing: Profile?, onDone: (Profile) -> 
     val g = goal.toIntOrNull()
     val valid = name.isNotBlank() && h != null && h in 100..230 && (weight.isBlank() || (w != null && w in 20.0..300.0)) && g != null && g in 1000..100000
 
-    AuthFrame {
-        Text("Create your profile", style = MaterialTheme.typography.headlineLarge)
+    AuthFrame(onBack) {
+        Text(if (existing?.isComplete == true) "Edit profile" else "Create your profile", style = MaterialTheme.typography.headlineLarge)
         Text("Height sets your stride, so step distance is accurate. Weight improves calorie estimates.",
             style = MaterialTheme.typography.bodyLarge, color = MettleColors.Ink2)
         OutlinedTextField(name, { name = it.take(40) }, label = { Text("Name shown to your group") }, singleLine = true, colors = fieldColors, modifier = Modifier.fillMaxWidth())
@@ -162,7 +165,7 @@ fun ProfileSetupScreen(userId: String, existing: Profile?, onDone: (Profile) -> 
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), colors = fieldColors, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(goal, { goal = it.filter(Char::isDigit).take(6) }, label = { Text("Daily step goal") }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), colors = fieldColors, modifier = Modifier.fillMaxWidth())
-        PrimaryButton("Save and continue", enabled = valid, busy = busy) {
+        PrimaryButton(if (existing?.isComplete == true) "Save" else "Save and continue", enabled = valid, busy = busy) {
             busy = true; error = null
             scope.launch {
                 runCatching { Backend.saveProfile(userId, name, h!!, w, g!!) }

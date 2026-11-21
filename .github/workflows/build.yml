@@ -43,7 +43,7 @@ jobs:
           fi
 
       - name: Unit tests
-        run: ./gradlew --no-daemon testDebugUnitTest
+        run: ./gradlew --no-daemon testDebugUnitTest --tests '*Test'
 
       - name: Build signed release
         if: steps.key.outputs.signed == 'true'
