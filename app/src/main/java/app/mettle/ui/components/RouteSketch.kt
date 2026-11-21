@@ -23,7 +23,7 @@ import kotlin.math.cos
  */
 @Composable
 fun RouteSketch(points: List<Pair<Double, Double>>, modifier: Modifier = Modifier) {
-    if (points.size < 2) return
+    if (points.size < 5) return   // a couple of GPS fixes is not a route worth drawing
     val minLat = points.minOf { it.first }; val maxLat = points.maxOf { it.first }
     val minLon = points.minOf { it.second }; val maxLon = points.maxOf { it.second }
     val lonScale = cos(Math.toRadians((minLat + maxLat) / 2))
