@@ -151,7 +151,12 @@ class TrackingService : Service(), SensorEventListener {
             }
             if (Build.VERSION.SDK_INT >= 34) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH
         }
-        ServiceCompat.startForeground(this, NOTIFICATION_ID, notification("Tracking your day"), type)
+        val n = notification("Tracking your day")
+        val ok = runCatching { ServiceCompat.startForeground(this, NOTIFICATION_ID, n, type) }.isSuccess ||
+            (Build.VERSION.SDK_INT >= 34 && runCatching { ServiceCompat.startForeground(this, NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH) }.isSuccess) ||
+            (Build.VERSION.SDK_INT >= 29 && type and ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION != 0 &&
+                runCatching { ServiceCompat.startForeground(this, NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION) }.isSuccess)
+        if (!ok) { stopSelf(); return }
     }
 
     private fun notification(text: String): Notification {
@@ -209,20 +214,31 @@ class TrackingService : Service(), SensorEventListener {
                 TrackingState.lastPressureHpa = event.values[0]
                 synchronized(altBuffer) {
                     altBuffer.addLast(wallMs to app.mettle.workout.WorkoutMath.pressureAltitudeM(event.values[0]))
-                    while (altBuffer.isNotEmpty() && altBuffer.first().first < wallMs - 6 * 60_000) altBuffer.removeFirst()
+                    while (altBuffer.isNotEmpty() && altBuffer.first().first < wallMs - 10 * 60_000) altBuffer.removeFirst()
                 }
             }
             Sensor.TYPE_STEP_DETECTOR -> addSteps(wallMs, 1)
             Sensor.TYPE_STEP_COUNTER -> {
                 val total = event.values[0].toLong()
                 val last = prefs.getLong(KEY_LAST_COUNTER, -1)
+                val lastT = prefs.getLong(KEY_LAST_COUNTER_T, 0L)
                 val delta = when {
                     last < 0 -> 0L              // first reading: just remember it
                     total < last -> total       // phone restarted, counter began again at 0
                     else -> total - last
                 }
-                prefs.edit().putLong(KEY_LAST_COUNTER, total).apply()
-                if (delta in 1..2000) addSteps(wallMs, delta.toInt())
+                prefs.edit().putLong(KEY_LAST_COUNTER, total).putLong(KEY_LAST_COUNTER_T, wallMs).apply()
+                val gapMin = if (lastT > 0) ((wallMs - lastT) / 60_000L).toInt() else 0
+                when {
+                    delta <= 0 -> Unit
+                    // Steps taken while tracking was stopped (update, battery saver, restart): spread them over the gap.
+                    gapMin >= 3 && delta > 250 -> {
+                        val usable = delta.coerceAtMost(gapMin * 200L).coerceAtMost(60_000L)
+                        val per = (usable / gapMin).toInt(); var rest = (usable - per.toLong() * gapMin).toInt()
+                        for (m in 0 until gapMin) { val n = per + if (rest-- > 0) 1 else 0; if (n > 0) addSteps(lastT + (m + 1) * 60_000L, n) }
+                    }
+                    else -> addSteps(wallMs, delta.coerceAtMost(3000).toInt())
+                }
             }
         }
     }
@@ -260,6 +276,8 @@ class TrackingService : Service(), SensorEventListener {
             val now = Instant.now().atZone(zone)
             val day = now.toLocalDate().toString()
             val minute = now.hour * 60 + now.minute
+            runCatching { sensors.flush(this) }      // deliver batched steps + pressure now
+            delay(1500)
             val posture = if (TrackingState.sensorState in setOf(DayState.STILL, DayState.UNKNOWN)) probePosture() else null
             writeLock.withLock {
                 val existing = db.day().minute(day, minute)
@@ -269,7 +287,7 @@ class TrackingService : Service(), SensorEventListener {
                     db.day().upsert(existing.copy(state = posture, updatedAt = System.currentTimeMillis()))
                 }
                 // Barometer phones: floors and lift rides in the minute that just ended.
-                val prevT = now.minusMinutes(1)
+                val prevT = now.minusMinutes(2)
                 val prevDay = prevT.toLocalDate().toString(); val prevMin = prevT.hour * 60 + prevT.minute
                 val startMs = prevT.withSecond(0).withNano(0).toInstant().toEpochMilli()
                 val alt = synchronized(altBuffer) { ArrayList(altBuffer) }
@@ -288,6 +306,14 @@ class TrackingService : Service(), SensorEventListener {
                 }
             }
             prefs.edit().putLong(KEY_HEARTBEAT, System.currentTimeMillis()).apply()
+            // GPS effort follows what you're doing, including trips with no steps (bike, car, bus, metro).
+            val recentSteps = (1..2).sumOf { db.day().minute(now.minusMinutes(it.toLong()).toLocalDate().toString(),
+                now.minusMinutes(it.toLong()).let { t -> t.hour * 60 + t.minute })?.steps ?: 0 }
+            val moving = when (TrackingState.sensorState) {
+                DayState.VEHICLE, DayState.CYCLING, DayState.RUNNING -> DayState.RUNNING
+                else -> if (recentSteps >= 40) DayState.WALKING else DayState.STILL
+            }
+            updateLocationRequests(moving)
             updateFallDetection()
             checkNoMovement(day, minute)
             if (minute % 1 == 0) runCatching { app.mettle.safety.AdminAlerts.poll(this@TrackingService) }
@@ -353,9 +379,10 @@ class TrackingService : Service(), SensorEventListener {
         locationState = bucket
         val request = when (bucket) {
             DayState.RUNNING -> LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 20_000L).setMinUpdateDistanceMeters(10f).build()
-            DayState.WALKING -> LocationRequest.Builder(Priority.PRIORITY_BALANCED_POWER_ACCURACY, 60_000L).setMinUpdateDistanceMeters(15f).build()
-            else -> LocationRequest.Builder(Priority.PRIORITY_BALANCED_POWER_ACCURACY, 15 * 60_000L)
-                .setMinUpdateIntervalMillis(5 * 60_000L).setMinUpdateDistanceMeters(50f).build()
+            DayState.WALKING -> LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 30_000L).setMinUpdateDistanceMeters(8f).build()
+            // Still: a cheap Wi-Fi/cell fix every few minutes, with NO distance filter, so a place you stay at gets enough points to be recognised.
+            else -> LocationRequest.Builder(Priority.PRIORITY_BALANCED_POWER_ACCURACY, 4 * 60_000L)
+                .setMinUpdateIntervalMillis(2 * 60_000L).build()
         }
         val client = LocationServices.getFusedLocationProviderClient(this)
         runCatching {
@@ -402,6 +429,7 @@ class TrackingService : Service(), SensorEventListener {
         const val NOTIFICATION_ID = 1001
         const val ACTION_STOP = "app.mettle.STOP_TRACKING"
         private const val KEY_LAST_COUNTER = "last_step_counter"
+        private const val KEY_LAST_COUNTER_T = "last_step_counter_t"
         private const val KEY_SERVICE_START = "service_start"
         private const val KEY_HEARTBEAT = "heartbeat"
         const val KEY_GAPS = "pending_gaps"

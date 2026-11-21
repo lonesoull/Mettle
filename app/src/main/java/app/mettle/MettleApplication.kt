@@ -8,6 +8,7 @@ class MettleApplication : Application() {
         super.onCreate()
         app.mettle.data.remote.Backend.init(this)
         runCatching { app.mettle.update.UpdateWorker.schedule(this) }
+        runCatching { app.mettle.tracking.TrackingWatchdog.schedule(this) }
     }
 
     val database: MettleDatabase by lazy { MettleDatabase.get(this) }
