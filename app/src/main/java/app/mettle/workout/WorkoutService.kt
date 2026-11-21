@@ -98,8 +98,10 @@ class WorkoutService : Service(), SensorEventListener {
             val live = state.value
             if (!live.recording) return
             for (l in result.locations) {
+                // Sea-level height (not GPS ellipsoid height); the correction is prepared once per area off the main thread.
+                if (!app.mettle.tracking.Msl.ready(l)) { val copy = android.location.Location(l); scope.launch(kotlinx.coroutines.Dispatchers.IO) { app.mettle.tracking.Msl.prepare(this@WorkoutService, copy) } }
                 val s = Sample(l.time, l.latitude, l.longitude, if (l.hasAccuracy()) l.accuracy else null,
-                    if (l.hasAltitude()) l.altitude else null, pressure, steps)
+                    app.mettle.tracking.Msl.corrected(l), pressure, steps)
                 synchronized(samples) { if (!live.paused) samples += s }
                 scope.launch {
                     db.recording().insert(RecordingSampleEntity(

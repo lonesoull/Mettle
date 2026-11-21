@@ -89,7 +89,8 @@ object HealthStore {
             acts.filter { Instant.ofEpochMilli(it.startedAt).atZone(zone).toLocalDate() == day }.sumOf { (it.trainingLoad ?: 0).toDouble() }
         }
         val (acute, chronic) = HealthMath.loads(perDay)
-        if (today == null && sleep == null && chronic == 0.0) return null
+        // Training load alone is not enough for a trustworthy score: need heart rate or sleep.
+        if (today == null && sleep == null) return null
         return HealthMath.readiness(today, baseline, sleep, acute, chronic)
     }
 }

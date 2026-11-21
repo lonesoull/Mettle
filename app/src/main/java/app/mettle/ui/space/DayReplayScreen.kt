@@ -86,12 +86,22 @@ fun DayReplayScreen(title: String, places: List<KnownPlace>, db: app.mettle.data
         }
     }
     val stays = remember(pts) { StayMath.stays(pts.map { TrackPt(it.tMs, it.lat, it.lon, it.accuracyM, it.altitudeM) }) }
-    val camera = rememberCameraPositionState { position = CameraPosition.fromLatLngZoom(LatLng(12.9716, 77.5946), 11f) }
-    LaunchedEffect(pts) {
-        if (pts.size >= 2) runCatching {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val camera = rememberCameraPositionState {
+        val near = app.mettle.ui.workout.LastFix.saved(ctx)
+        position = CameraPosition.fromLatLngZoom(near ?: LatLng(20.5937, 78.9629), if (near != null) 15f else 4f)
+    }
+    var mapReady by remember { mutableStateOf(false) }
+    LaunchedEffect(pts, mapReady) {
+        if (!mapReady || pts.isEmpty()) return@LaunchedEffect
+        runCatching {
             val b = LatLngBounds.builder(); pts.forEach { b.include(LatLng(it.lat, it.lon)) }
-            camera.move(CameraUpdateFactory.newLatLngBounds(b.build(), 80))
-        } else if (pts.size == 1) camera.move(CameraUpdateFactory.newLatLngZoom(LatLng(pts[0].lat, pts[0].lon), 15f))
+            val bounds = b.build()
+            // A day spent in one spot: don't zoom to street-crumb level, show the neighbourhood.
+            val span = app.mettle.workout.WorkoutMath.haversineM(bounds.southwest.latitude, bounds.southwest.longitude, bounds.northeast.latitude, bounds.northeast.longitude)
+            if (span < 300) camera.move(CameraUpdateFactory.newLatLngZoom(bounds.center, 16f))
+            else camera.move(CameraUpdateFactory.newLatLngBounds(bounds, 80))
+        }
     }
 
     Column(Modifier.fillMaxSize().background(MettleColors.Surface)) {
@@ -106,15 +116,21 @@ fun DayReplayScreen(title: String, places: List<KnownPlace>, db: app.mettle.data
         if (db != null) DayTotals(db, day)
         Box(Modifier.fillMaxWidth().height(280.dp)) {
             if (!app.mettle.ui.workout.MapsConfig.enabled) Box(Modifier.fillMaxSize().background(MettleColors.Band)) else
-            GoogleMap(Modifier.fillMaxSize(), cameraPositionState = camera, properties = MapProperties(isBuildingEnabled = true),
-                uiSettings = MapUiSettings(zoomControlsEnabled = false, mapToolbarEnabled = false)) {
+            GoogleMap(Modifier.fillMaxSize().semantics { contentDescription = "Map of your day" }, cameraPositionState = camera, properties = MapProperties(isBuildingEnabled = true),
+                uiSettings = MapUiSettings(zoomControlsEnabled = false, mapToolbarEnabled = false, tiltGesturesEnabled = false),
+                onMapLoaded = { mapReady = true }) {
                 if (pts.size >= 2) {
                     val line = app.mettle.ui.workout.thin(pts.map { it.lat to it.lon }, 600).map { LatLng(it.first, it.second) }
                     Polyline(points = line, color = MettleColors.Surface, width = 16f)
                     Polyline(points = line, color = MettleColors.Orange, width = 8f)
                 }
                 stays.forEach { s -> Circle(center = LatLng(s.lat, s.lon), radius = 40.0, fillColor = MettleColors.Ink.copy(alpha = 0.15f), strokeColor = MettleColors.Ink, strokeWidth = 2f) }
-                pts.getOrNull(idx)?.let { p -> Circle(center = LatLng(p.lat, p.lon), radius = 12.0, fillColor = MettleColors.Descent, strokeColor = MettleColors.Surface, strokeWidth = 8f, zIndex = 5f) }
+                // Replay position: a fixed-size dot (same size at every zoom), like the "you are here" dot.
+                val dot = remember { app.mettle.ui.workout.dotIcon(MettleColors.Descent) }
+                pts.getOrNull(idx)?.let { p ->
+                    com.google.maps.android.compose.Marker(state = com.google.maps.android.compose.rememberMarkerState(position = LatLng(p.lat, p.lon)).also { it.position = LatLng(p.lat, p.lon) },
+                        icon = dot, anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.5f), flat = true, zIndex = 5f, title = "Replay position")
+                }
             }
             if (points == null) Text("Loading…", modifier = Modifier.align(Alignment.Center), style = MaterialTheme.typography.titleMedium)
             else if (pts.isEmpty()) Text("No location data for this day", modifier = Modifier.align(Alignment.Center).background(MettleColors.Surface).padding(12.dp), style = MaterialTheme.typography.titleMedium)
@@ -124,8 +140,8 @@ fun DayReplayScreen(title: String, places: List<KnownPlace>, db: app.mettle.data
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(cur?.let { Instant.ofEpochMilli(it.tMs).atZone(zone).format(DateTimeFormatter.ofPattern("h:mm a")) } ?: "--:--", style = MettleType.StatLarge)
                 Column(Modifier.weight(1f)) {
-                    Text(cur?.state?.replaceFirstChar { it.uppercase() } ?: "", style = MaterialTheme.typography.titleMedium)
-                    Text(cur?.let { p -> (p.altitudeM?.let { "${it.toInt()} m above sea" } ?: "") + (p.accuracyM?.let { " · ±${it.toInt()} m" } ?: "") } ?: "",
+                    Text(cur?.state?.takeUnless { it.equals("unknown", true) }?.replaceFirstChar { it.uppercase() } ?: "Location", style = MaterialTheme.typography.titleMedium)
+                    Text(cur?.let { p -> (p.altitudeM?.takeIf { it > -30 }?.let { "${it.toInt()} m above sea" } ?: "") + (p.accuracyM?.let { " · ±${it.toInt()} m" } ?: "") } ?: "",
                         style = MettleType.Label, color = MettleColors.Sub)
                 }
                 IconButton(onClick = { if (idx >= pts.lastIndex) idx = 0; playing = !playing },

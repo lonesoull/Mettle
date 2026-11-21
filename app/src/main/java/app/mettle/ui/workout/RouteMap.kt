@@ -60,6 +60,11 @@ fun RouteMap(points: List<Pair<Double, Double>>, follow: Boolean, modifier: Modi
     }
     val context = LocalContext.current
     val line = remember(points.size) { thin(points).map { LatLng(it.first, it.second) } }
+    // GPS gaps (signal lost, e.g. indoors): consecutive raw points far apart are joined with a grey dashed line, not a solid route.
+    val gaps = remember(points.size) {
+        points.zipWithNext().filter { (a, b) -> WorkoutMath.haversineM(a.first, a.second, b.first, b.second) > 40 }
+            .map { (a, b) -> listOf(LatLng(a.first, a.second), LatLng(b.first, b.second)) }
+    }
     // Where "you" are: the newest route point, else a fresh fix passed in, else the phone's last known spot.
     val last = points.lastOrNull()?.let { LatLng(it.first, it.second) } ?: here
     val start = remember { last ?: LastFix.saved(context) }
@@ -81,7 +86,13 @@ fun RouteMap(points: List<Pair<Double, Double>>, follow: Boolean, modifier: Modi
         runCatching {
             if (follow && last != null) camera.animate(CameraUpdateFactory.newLatLngZoom(last, camera.position.zoom.coerceAtLeast(15f)), 500)
             else if (line.size == 1) camera.move(CameraUpdateFactory.newLatLngZoom(line[0], 15f))
-            else { val b = LatLngBounds.builder(); line.forEach { b.include(it) }; camera.move(CameraUpdateFactory.newLatLngBounds(b.build(), 64)) }
+            else {
+                val b = LatLngBounds.builder(); line.forEach { b.include(it) }; val bounds = b.build()
+                // Tiny routes: don't zoom in to rooftop level.
+                if (WorkoutMath.haversineM(bounds.southwest.latitude, bounds.southwest.longitude, bounds.northeast.latitude, bounds.northeast.longitude) < 250)
+                    camera.move(CameraUpdateFactory.newLatLngZoom(bounds.center, 17f))
+                else camera.move(CameraUpdateFactory.newLatLngBounds(bounds, 64))
+            }
         }
     }
     Box(modifier.semantics { contentDescription = if (follow) "Live map of your route" else "Map of the route" }) {
@@ -98,7 +109,17 @@ fun RouteMap(points: List<Pair<Double, Double>>, follow: Boolean, modifier: Modi
                 Polyline(points = line, color = MettleColors.Surface, width = 16f, zIndex = 1f)
                 Polyline(points = line, color = MettleColors.Orange, width = 9f, zIndex = 2f)
             }
-            line.firstOrNull()?.let { Circle(center = it, radius = 6.0, fillColor = MettleColors.Good, strokeColor = MettleColors.Surface, strokeWidth = 6f, zIndex = 3f) }
+            gaps.forEach { g ->
+                Polyline(points = g, color = MettleColors.Muted, width = 10f, zIndex = 2.5f,
+                    pattern = listOf(com.google.android.gms.maps.model.Dash(18f), com.google.android.gms.maps.model.Gap(14f)))
+            }
+            // Start (green) and finish (dark) as fixed-size dots, same size at any zoom.
+            val startDot = remember { dotIcon(MettleColors.Good, 44) }
+            val endDot = remember { dotIcon(MettleColors.Ink, 44) }
+            line.firstOrNull()?.let { com.google.maps.android.compose.Marker(state = com.google.maps.android.compose.rememberMarkerState(position = it), icon = startDot,
+                anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.5f), flat = true, zIndex = 3f, title = "Start") }
+            if (!follow && line.size >= 2) com.google.maps.android.compose.Marker(state = com.google.maps.android.compose.rememberMarkerState(position = line.last()), icon = endDot,
+                anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.5f), flat = true, zIndex = 3f, title = "Finish")
         }
         if (slow) {
             Text("Map is slow to load. Check your internet connection.", style = MaterialTheme.typography.bodyMedium,
@@ -106,3 +127,15 @@ fun RouteMap(points: List<Pair<Double, Double>>, follow: Boolean, modifier: Modi
         }
     }
 }
+
+/** A round dot with a white ring, drawn once as a bitmap so it stays the same size at every zoom. */
+fun dotIcon(color: androidx.compose.ui.graphics.Color, sizePx: Int = 54): com.google.android.gms.maps.model.BitmapDescriptor? = runCatching {
+    val bmp = android.graphics.Bitmap.createBitmap(sizePx, sizePx, android.graphics.Bitmap.Config.ARGB_8888)
+    val c = android.graphics.Canvas(bmp)
+    val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    val r = sizePx / 2f
+    p.color = android.graphics.Color.argb(60, 0, 0, 0); c.drawCircle(r, r + 1.5f, r - 1f, p)
+    p.color = android.graphics.Color.WHITE; c.drawCircle(r, r, r - 3f, p)
+    p.color = android.graphics.Color.argb(255, (color.red * 255).toInt(), (color.green * 255).toInt(), (color.blue * 255).toInt()); c.drawCircle(r, r, r - 10f, p)
+    com.google.android.gms.maps.model.BitmapDescriptorFactory.fromBitmap(bmp)
+}.getOrNull()

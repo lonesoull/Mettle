@@ -77,18 +77,23 @@ class TrackingService : Service(), SensorEventListener {
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
+            val pressure = TrackingState.lastPressureHpa
+            val sensed = TrackingState.sensorState
+            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val points = result.locations.map { l ->
                 TrackPointEntity(
                     tMs = l.time, lat = l.latitude, lon = l.longitude,
-                    altitudeM = if (l.hasAltitude()) l.altitude else null,
+                    altitudeM = Msl.altitude(this@TrackingService, l),
                     accuracyM = if (l.hasAccuracy()) l.accuracy else null,
                     verticalAccuracyM = if (Build.VERSION.SDK_INT >= 26 && l.hasVerticalAccuracy()) l.verticalAccuracyMeters else null,
                     speedMs = if (l.hasSpeed()) l.speed else null,
-                    pressureHpa = TrackingState.lastPressureHpa,
-                    state = TrackingState.sensorState,
+                    pressureHpa = pressure,
+                    state = sensed,
                 )
             }
-            scope.launch { points.forEach { db.track().insert(it) } }
+            points.forEach { db.track().insert(it) }
+            points.lastOrNull()?.let { app.mettle.ui.workout.LastFix.save(this@TrackingService, it.lat, it.lon) }
+            }
         }
     }
 

@@ -88,7 +88,7 @@ private fun RootContent(
         profile?.isComplete != true -> ProfileSetupScreen(signedIn.userId, profile, onDone = { p ->
             ProfileCache.saveProfile(context, p); onProfile(p)
         })
-        else -> MettleApp(db, profile, onSignOut = { })
+        else -> MettleApp(db, profile, onSignOut = { }, onProfile = onProfile)
     }
 }
 

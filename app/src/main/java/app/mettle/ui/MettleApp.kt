@@ -76,7 +76,7 @@ suspend fun localDay(db: MettleDatabase, date: LocalDate): List<ReplayPoint> {
 }
 
 @Composable
-fun MettleApp(db: MettleDatabase, profile: Profile, onSignOut: () -> Unit) {
+fun MettleApp(db: MettleDatabase, profile: Profile, onSignOut: () -> Unit, onProfile: (Profile) -> Unit = {}) {
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route
@@ -138,7 +138,7 @@ fun MettleApp(db: MettleDatabase, profile: Profile, onSignOut: () -> Unit) {
             composable("transfer") { app.mettle.ui.transfer.TransferScreen(onBack = { nav.popBackStack() }) }
             composable("sensorlab") { app.mettle.ui.lab.SensorLabScreen(onBack = { nav.popBackStack() }) }
             composable("editprofile") {
-                app.mettle.ui.auth.ProfileSetupScreen(profile.id, profile, onDone = { p -> app.mettle.sync.ProfileCache.saveProfile(ctx, p); nav.popBackStack() },
+                app.mettle.ui.auth.ProfileSetupScreen(profile.id, profile, onDone = { p -> app.mettle.sync.ProfileCache.saveProfile(ctx, p); onProfile(p); nav.popBackStack() },
                     onBack = { nav.popBackStack() })
             }
             composable("admin") {

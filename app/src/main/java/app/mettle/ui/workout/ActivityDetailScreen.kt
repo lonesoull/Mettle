@@ -72,7 +72,13 @@ fun ActivityDetailScreen(db: MettleDatabase, activityId: String, onBack: () -> U
             Column(Modifier.background(MettleColors.Surface)) {
                 TopBar(act.title, onBack = onBack)
                 val route = remember(act.routePolyline) { act.routePolyline?.let { Polyline.decode(it) }.orEmpty() }
-                if (route.size >= 2) RouteMap(route, follow = false, interactive = false, lite = true, modifier = Modifier.fillMaxWidth().height(260.dp))
+                if (route.size >= 5) RouteMap(route, follow = false, interactive = false, lite = true, modifier = Modifier.fillMaxWidth().height(260.dp))
+                else if (act.type != app.mettle.data.db.ActivityType.STAIRS) Row(Modifier.fillMaxWidth().background(MettleColors.Band).padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    androidx.compose.material3.Icon(app.mettle.ui.theme.MettleIcons.Info, contentDescription = null, tint = MettleColors.Sub)
+                    Text("No route map: GPS recorded only ${route.size} point${if (route.size == 1) "" else "s"}. This usually happens indoors or when the workout is very short.",
+                        style = MaterialTheme.typography.bodyMedium, color = MettleColors.Ink2)
+                }
                 Header(act)
             }
         }
@@ -85,7 +91,7 @@ fun ActivityDetailScreen(db: MettleDatabase, activityId: String, onBack: () -> U
                 }
             }
         }
-        if (streams != null && streams!!.dist.size > 10) item { Charts(streams!!) }
+        if (streams != null && streams!!.dist.size > 10 && streams!!.dist.last() >= 300) item { Charts(streams!!) }
         val splits = laps.filter { it.kind == LapKind.AUTO_KM }
         if (splits.isNotEmpty()) item {
             Section {
@@ -162,7 +168,7 @@ private fun Header(a: ActivityEntity) {
         // Only stats that mean something for this kind of workout, and only when measured.
         val stairs = a.type == app.mettle.data.db.ActivityType.STAIRS
         val tiles = buildList<Triple<String, String, String?>> {
-            if (!stairs && a.gapSKm != null) add(Triple("GAP", Fmt.pace(a.gapSKm), "/km"))
+            if (!stairs && a.gapSKm != null && a.elevGainM >= 10) add(Triple("GAP", Fmt.pace(a.gapSKm), "/km"))
             add(Triple("Climb", "${a.elevGainM.toInt()}", "m"))
             if (stairs) add(Triple("Moving", Fmt.duration(a.movingS.toLong()), null)) else add(Triple("Elapsed", Fmt.duration(a.elapsedS.toLong()), null))
             if (stairs && a.movingS > 0) add(Triple("Vertical", "${(a.elevGainM * 3600 / a.movingS).toInt()}", "m/h"))
@@ -195,9 +201,12 @@ private fun Charts(s: Streams) {
         out
     }
     val alt = remember(s) { s.dist.indices.mapNotNull { i -> s.alt[i]?.let { s.dist[i] to it } } }
+    val altLo = alt.minOfOrNull { it.second } ?: 0.0; val altHi = alt.maxOfOrNull { it.second } ?: 0.0
+    val showAlt = alt.size > 2 && altHi - altLo >= 3
+    if (pace.size <= 2 && !showAlt) return
     Section {
-        Text("Pace", style = MaterialTheme.typography.titleLarge)
         if (pace.size > 2) {
+            Text("Pace", style = MaterialTheme.typography.titleLarge)
             val lo = pace.minOf { it.second }; val hi = pace.maxOf { it.second }
             Canvas(Modifier.fillMaxWidth().height(110.dp)) {
                 val path = Path()
@@ -213,7 +222,7 @@ private fun Charts(s: Streams) {
                 Text("slowest ${Fmt.pace(hi)}", style = MettleType.Label, color = MettleColors.Sub)
             }
         }
-        if (alt.size > 2) {
+        if (showAlt) {
             Text("Elevation", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 8.dp))
             val lo = alt.minOf { it.second }; val hi = alt.maxOf { it.second }.coerceAtLeast(lo + 10)
             Canvas(Modifier.fillMaxWidth().height(80.dp)) {
@@ -223,8 +232,8 @@ private fun Charts(s: Streams) {
                 drawPath(path, Brush.verticalGradient(listOf(MettleColors.Muted.copy(alpha = 0.6f), MettleColors.Band)))
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("${lo.toInt()} m", style = MettleType.Label, color = MettleColors.Sub)
-                Text("${hi.toInt()} m", style = MettleType.Label, color = MettleColors.Sub)
+                Text("Lowest ${altLo.toInt()} m · highest ${altHi.toInt()} m above sea", style = MettleType.Label, color = MettleColors.Sub)
+                Text(Fmt.km2(total.toLong()) + " km", style = MettleType.Label, color = MettleColors.Sub)
             }
         }
     }
