@@ -1,5 +1,8 @@
 package app.mettle.ui.workout
 
+import androidx.compose.runtime.setValue
+
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -59,20 +62,53 @@ fun effortLabel(e: String) = when (e) {
 }
 
 @Composable
-fun ActivityDetailScreen(db: MettleDatabase, activityId: String, onBack: () -> Unit) {
+fun ActivityDetailScreen(db: MettleDatabase, activityId: String, onBack: () -> Unit, onOpenMap: () -> Unit = {}) {
     val context = LocalContext.current
     val a by db.activities().byId(activityId).collectAsState(null)
     val laps by db.laps().forActivity(activityId).collectAsState(emptyList())
     val efforts by db.bestEfforts().forActivity(activityId).collectAsState(emptyList())
     val streams by produceState<Streams?>(null, activityId) { value = withContext(Dispatchers.IO) { WorkoutSaver.readStreams(context, activityId) } }
     val act = a ?: return
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var menu by remember { androidx.compose.runtime.mutableStateOf(false) }
+    var editing by remember { androidx.compose.runtime.mutableStateOf(false) }
+    var deleting by remember { androidx.compose.runtime.mutableStateOf(false) }
 
     LazyColumn(Modifier.fillMaxSize().background(MettleColors.Band), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             Column(Modifier.background(MettleColors.Surface)) {
-                TopBar(act.title, onBack = onBack)
+                TopBar(act.title, onBack = onBack) {
+                    if (act.type != app.mettle.data.db.ActivityType.STAIRS) androidx.compose.material3.IconButton(onClick = {
+                        scope.launch {
+                            val f = withContext(Dispatchers.IO) { app.mettle.transfer.Gpx.exportOne(context, act.id) }
+                            if (f == null) android.widget.Toast.makeText(context, "This workout has no GPS route to share", android.widget.Toast.LENGTH_SHORT).show()
+                            else {
+                                val uri = androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".files", f)
+                                context.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND)
+                                    .setType("application/gpx+xml").putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                                    .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share workout (GPX)"))
+                            }
+                        }
+                    }) { androidx.compose.material3.Icon(app.mettle.ui.theme.MettleIcons.Share, contentDescription = "Share as GPX file") }
+                    Box {
+                        androidx.compose.material3.IconButton(onClick = { menu = true }) {
+                            androidx.compose.material3.Icon(app.mettle.ui.theme.MettleIcons.More, contentDescription = "More options")
+                        }
+                        androidx.compose.material3.DropdownMenu(menu, onDismissRequest = { menu = false }) {
+                            androidx.compose.material3.DropdownMenuItem(text = { Text("Edit title and notes") }, onClick = { menu = false; editing = true })
+                            androidx.compose.material3.DropdownMenuItem(text = { Text("Delete workout", color = MettleColors.WarnText) }, onClick = { menu = false; deleting = true })
+                        }
+                    }
+                }
                 val route = remember(act.routePolyline) { act.routePolyline?.let { Polyline.decode(it) }.orEmpty() }
-                if (route.size >= 5) RouteMap(route, follow = false, interactive = false, lite = true, modifier = Modifier.fillMaxWidth().height(260.dp))
+                if (route.size >= 5) Box(Modifier.fillMaxWidth().height(260.dp)) {
+                    RouteMap(route, follow = false, interactive = false, lite = true, modifier = Modifier.fillMaxSize())
+                    // Lite maps ignore touches; a clear button opens the full interactive map.
+                    androidx.compose.material3.Surface(onClick = onOpenMap, shape = RoundedCornerShape(20.dp), color = MettleColors.Surface, shadowElevation = 4.dp,
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp)) {
+                        Text("Expand map", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
+                    }
+                }
                 else if (act.type != app.mettle.data.db.ActivityType.STAIRS) Row(Modifier.fillMaxWidth().background(MettleColors.Band).padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     androidx.compose.material3.Icon(app.mettle.ui.theme.MettleIcons.Info, contentDescription = null, tint = MettleColors.Sub)
@@ -91,7 +127,7 @@ fun ActivityDetailScreen(db: MettleDatabase, activityId: String, onBack: () -> U
                 }
             }
         }
-        if (streams != null && streams!!.dist.size > 10 && streams!!.dist.last() >= 300) item { Charts(streams!!) }
+        if (streams != null && streams!!.dist.size > 10 && streams!!.dist.last() >= 300) item { ScrubCharts(streams!!) }
         val splits = laps.filter { it.kind == LapKind.AUTO_KM }
         if (splits.isNotEmpty()) item {
             Section {
@@ -131,22 +167,48 @@ fun ActivityDetailScreen(db: MettleDatabase, activityId: String, onBack: () -> U
                 }
             }
         }
-        if (efforts.isNotEmpty()) item {
-            Section {
-                Text("Best efforts", style = MaterialTheme.typography.titleLarge)
-                efforts.sortedBy { it.timeS }.sortedBy { listOf("run_400m", "run_1k", "run_1mi", "run_5k", "run_10k", "run_half").indexOf(it.effort) }.forEach { e ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(effortLabel(e.effort), style = MaterialTheme.typography.bodyLarge)
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text(Fmt.duration(e.timeS.toLong()), style = MaterialTheme.typography.titleSmall)
-                            if (e.rankAtTime == 1) Text("PR ★", style = MaterialTheme.typography.titleSmall, color = MettleColors.GoldText)
-                        }
-                    }
-                }
-            }
-        }
+        if (efforts.isNotEmpty()) item { Achievements(efforts) }
+        item { ActivitySocial(act.id) }
         item { Spacer(Modifier.height(16.dp)) }
     }
+
+    if (editing) {
+        var title by remember { androidx.compose.runtime.mutableStateOf(act.title) }
+        var notes by remember { androidx.compose.runtime.mutableStateOf(act.description.orEmpty()) }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { editing = false },
+            title = { Text("Edit workout") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    androidx.compose.material3.OutlinedTextField(title, { if (it.length <= 80) title = it }, label = { Text("Title") }, singleLine = true)
+                    androidx.compose.material3.OutlinedTextField(notes, { if (it.length <= 1000) notes = it }, label = { Text("How did it go?") }, minLines = 3)
+                }
+            },
+            confirmButton = { androidx.compose.material3.TextButton(enabled = title.isNotBlank(), onClick = {
+                editing = false
+                scope.launch {
+                    db.activities().upsert(act.copy(title = title.trim(), description = notes.trim().ifBlank { null }, updatedAt = System.currentTimeMillis()))
+                    app.mettle.sync.SyncWorker.schedule(context)
+                }
+            }) { Text("Save", color = MettleColors.Orange) } },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { editing = false }) { Text("Cancel", color = MettleColors.Ink) } },
+        )
+    }
+    if (deleting) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { deleting = false },
+        title = { Text("Delete this workout?") },
+        text = { Text("It will be removed from your activities, progress and the group feed. This can't be undone.") },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = {
+            deleting = false
+            scope.launch {
+                val now = System.currentTimeMillis()
+                db.activities().upsert(act.copy(deletedAt = now, updatedAt = now))
+                app.mettle.sync.SyncWorker.schedule(context)
+                onBack()
+            }
+        }) { Text("Delete", color = MettleColors.WarnText) } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = { deleting = false }) { Text("Cancel", color = MettleColors.Ink) } },
+    )
 }
 
 @Composable
@@ -186,55 +248,3 @@ private fun Header(a: ActivityEntity) {
     }
 }
 
-@Composable
-private fun Charts(s: Streams) {
-    // Pace smoothed over ~100 m, and the elevation profile, both against distance.
-    val total = s.dist.last().coerceAtLeast(1.0)
-    val pace = remember(s) {
-        val out = ArrayList<Pair<Double, Double>>(); var j = 0
-        for (i in s.dist.indices) {
-            while (j < s.dist.size && s.dist[j] - s.dist[i] < 100) j++
-            if (j >= s.dist.size) break
-            val dt = (s.t[j] - s.t[i]).toDouble(); val d = s.dist[j] - s.dist[i]
-            if (dt > 0 && d > 0 && s.moving[j]) out += s.dist[i] to (dt / (d / 1000.0)).coerceIn(150.0, 900.0)
-        }
-        out
-    }
-    val alt = remember(s) { s.dist.indices.mapNotNull { i -> s.alt[i]?.let { s.dist[i] to it } } }
-    val altLo = alt.minOfOrNull { it.second } ?: 0.0; val altHi = alt.maxOfOrNull { it.second } ?: 0.0
-    val showAlt = alt.size > 2 && altHi - altLo >= 3
-    if (pace.size <= 2 && !showAlt) return
-    Section {
-        if (pace.size > 2) {
-            Text("Pace", style = MaterialTheme.typography.titleLarge)
-            val lo = pace.minOf { it.second }; val hi = pace.maxOf { it.second }
-            Canvas(Modifier.fillMaxWidth().height(110.dp)) {
-                val path = Path()
-                pace.forEachIndexed { k, (d, p) ->
-                    val x = (d / total * size.width).toFloat()
-                    val y = ((p - lo) / (hi - lo).coerceAtLeast(1.0) * (size.height - 8) + 4).toFloat()  // faster = higher
-                    if (k == 0) path.moveTo(x, y) else path.lineTo(x, y)
-                }
-                drawPath(path, MettleColors.Orange, style = Stroke(5f))
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("fastest ${Fmt.pace(lo)}", style = MettleType.Label, color = MettleColors.Sub)
-                Text("slowest ${Fmt.pace(hi)}", style = MettleType.Label, color = MettleColors.Sub)
-            }
-        }
-        if (showAlt) {
-            Text("Elevation", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 8.dp))
-            val lo = alt.minOf { it.second }; val hi = alt.maxOf { it.second }.coerceAtLeast(lo + 10)
-            Canvas(Modifier.fillMaxWidth().height(80.dp)) {
-                val path = Path().apply { moveTo(0f, size.height) }
-                alt.forEach { (d, h) -> path.lineTo((d / total * size.width).toFloat(), (size.height - (h - lo) / (hi - lo) * size.height).toFloat()) }
-                path.lineTo(size.width, size.height); path.close()
-                drawPath(path, Brush.verticalGradient(listOf(MettleColors.Muted.copy(alpha = 0.6f), MettleColors.Band)))
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Lowest ${altLo.toInt()} m · highest ${altHi.toInt()} m above sea", style = MettleType.Label, color = MettleColors.Sub)
-                Text(Fmt.km2(total.toLong()) + " km", style = MettleType.Label, color = MettleColors.Sub)
-            }
-        }
-    }
-}

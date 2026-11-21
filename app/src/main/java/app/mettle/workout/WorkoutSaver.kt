@@ -28,6 +28,7 @@ data class Streams(
     val v: Int = 1,
     val t: List<Int>, val lat: List<Double>, val lon: List<Double>,
     val dist: List<Double>, val alt: List<Double?>, val moving: List<Boolean>,
+    val hr: List<Int?>? = null,     // heart rate per point (strap/watch), when one was connected
 )
 
 data class SaveDetails(val title: String, val description: String?, val rpe: Int?, val visibility: Visibility)
@@ -65,7 +66,17 @@ object WorkoutSaver {
         val elapsed = raw.lastOrNull()?.let { ((it.tMs - startedAt) / 1000).toInt() } ?: r.elapsedS
 
         GZIPOutputStream(streamsFile(context, id).outputStream()).bufferedWriter().use {
-            it.write(json.encodeToString(Streams.serializer(), Streams(1, r.t, r.lat, r.lon, r.dist, r.alt, r.moving)))
+            // Heart rate per kept point: nearest strap reading within 5 s.
+            val hrRows = raw.filter { it.heartRate != null }.map { it.tMs to it.heartRate!! }
+            val hr = if (hrRows.size < 10) null else {
+                var j = 0
+                r.t.map { off ->
+                    val tMs = (samples.firstOrNull()?.tMs ?: startedAt) + off * 1000L
+                    while (j + 1 < hrRows.size && kotlin.math.abs(hrRows[j + 1].first - tMs) <= kotlin.math.abs(hrRows[j].first - tMs)) j++
+                    hrRows[j].takeIf { kotlin.math.abs(it.first - tMs) <= 5000 }?.second
+                }
+            }
+            it.write(json.encodeToString(Streams.serializer(), Streams(2, r.t, r.lat, r.lon, r.dist, r.alt, r.moving, hr)))
         }
         val keep = WorkoutMath.simplify(r.lat, r.lon)
         val polyline = Polyline.encode(keep.map { r.lat[it] to r.lon[it] })
@@ -162,7 +173,7 @@ object WorkoutSaver {
         val now = System.currentTimeMillis()
         val startedAt = samples.minOf { it.tMs }
         GZIPOutputStream(streamsFile(context, id).outputStream()).bufferedWriter().use {
-            it.write(json.encodeToString(Streams.serializer(), Streams(1, r.t, r.lat, r.lon, r.dist, r.alt, r.moving)))
+            it.write(json.encodeToString(Streams.serializer(), Streams(2, r.t, r.lat, r.lon, r.dist, r.alt, r.moving)))
         }
         val keep = WorkoutMath.simplify(r.lat, r.lon)
         db.activities().upsert(ActivityEntity(

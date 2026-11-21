@@ -96,19 +96,39 @@ object Gpx {
             db.activities().betweenNow(0, Long.MAX_VALUE).forEach { a ->
                 val s = WorkoutSaver.readStreams(context, a.id) ?: return@forEach
                 if (s.lat.isEmpty()) return@forEach
-                zip.putNextEntry(ZipEntry("${Instant.ofEpochMilli(a.startedAt).toString().take(10)}-${a.title.replace(Regex("[^A-Za-z0-9]+"), "-")}-${a.id.take(6)}.gpx"))
-                val sb = StringBuilder("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<gpx version=\"1.1\" creator=\"Mettle\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n")
-                sb.append("<trk><name>").append(a.title.replace("<", "&lt;").replace("&", "&amp;")).append("</name><type>").append(a.type.name.lowercase()).append("</type><trkseg>\n")
-                for (i in s.lat.indices) {
-                    sb.append("<trkpt lat=\"").append(s.lat[i]).append("\" lon=\"").append(s.lon[i]).append("\">")
-                    s.alt.getOrNull(i)?.let { sb.append("<ele>").append(String.format(java.util.Locale.US, "%.1f", it)).append("</ele>") }
-                    sb.append("<time>").append(Instant.ofEpochMilli(a.startedAt + s.t[i] * 1000L)).append("</time></trkpt>\n")
-                }
-                sb.append("</trkseg></trk>\n</gpx>\n")
-                zip.write(sb.toString().toByteArray()); zip.closeEntry()
+                zip.putNextEntry(ZipEntry(fileName(a)))
+                zip.write(gpxText(a, s).toByteArray()); zip.closeEntry()
             }
         }
         return out
+    }
+
+    private fun fileName(a: app.mettle.data.db.ActivityEntity) =
+        "${Instant.ofEpochMilli(a.startedAt).toString().take(10)}-${a.title.replace(Regex("[^A-Za-z0-9]+"), "-")}-${a.id.take(6)}.gpx"
+
+    /** GPX 1.1 with elevation, time and (when recorded) heart rate — opens in Strava, Garmin, Google Earth. */
+    fun gpxText(a: app.mettle.data.db.ActivityEntity, s: app.mettle.workout.Streams): String {
+        val esc = { x: String -> x.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;") }
+        val sb = StringBuilder("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<gpx version=\"1.1\" creator=\"Mettle\" xmlns=\"http://www.topografix.com/GPX/1/1\" " +
+            "xmlns:gpxtpx=\"http://www.garmin.com/xmlschemas/TrackPointExtension/v1\">\n")
+        sb.append("<trk><name>").append(esc(a.title)).append("</name><type>").append(a.type.name.lowercase()).append("</type><trkseg>\n")
+        for (i in s.lat.indices) {
+            sb.append("<trkpt lat=\"").append(s.lat[i]).append("\" lon=\"").append(s.lon[i]).append("\">")
+            s.alt.getOrNull(i)?.let { sb.append("<ele>").append(String.format(java.util.Locale.US, "%.1f", it)).append("</ele>") }
+            sb.append("<time>").append(Instant.ofEpochMilli(a.startedAt + s.t[i] * 1000L)).append("</time>")
+            s.hr?.getOrNull(i)?.let { sb.append("<extensions><gpxtpx:TrackPointExtension><gpxtpx:hr>").append(it).append("</gpxtpx:hr></gpxtpx:TrackPointExtension></extensions>") }
+            sb.append("</trkpt>\n")
+        }
+        sb.append("</trkseg></trk>\n</gpx>\n")
+        return sb.toString()
+    }
+
+    /** One workout as a .gpx file ready to share. Null if it has no GPS route. */
+    suspend fun exportOne(context: Context, activityId: String): File? {
+        val db = (context.applicationContext as MettleApplication).database
+        val a = db.activities().get(activityId) ?: return null
+        val s = WorkoutSaver.readStreams(context, a.id)?.takeIf { it.lat.isNotEmpty() } ?: return null
+        return File(context.cacheDir, "exports").apply { mkdirs() }.let { File(it, fileName(a)) }.also { it.writeText(gpxText(a, s)) }
     }
 
     /** Daily totals as CSV (date, steps, floors up). */

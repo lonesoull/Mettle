@@ -130,7 +130,11 @@ fun MettleApp(db: MettleDatabase, profile: Profile, onSignOut: () -> Unit, onPro
             composable("calibrate/{id}") { e -> app.mettle.ui.stairs.CalibrationScreen(db, e.arguments?.getString("id") ?: "", onDone = { nav.popBackStack() }) }
 
             // ---- Inner screens (back arrow)
-            composable("activity/{id}") { e -> app.mettle.ui.workout.ActivityDetailScreen(db, e.arguments?.getString("id") ?: "", onBack = { nav.popBackStack() }) }
+            composable("activity/{id}") { e ->
+                val id = e.arguments?.getString("id") ?: ""
+                app.mettle.ui.workout.ActivityDetailScreen(db, id, onBack = { nav.popBackStack() }, onOpenMap = { nav.navigate("activitymap/$id") })
+            }
+            composable("activitymap/{id}") { e -> app.mettle.ui.workout.ActivityMapScreen(db, e.arguments?.getString("id") ?: "", onBack = { nav.popBackStack() }) }
             composable("setup") { app.mettle.ui.tracking.TrackingSetupScreen(onDone = { nav.popBackStack() }, onBack = { nav.popBackStack() }) }
             composable("safety") { app.mettle.ui.safety.SafetyScreen(onBack = { nav.popBackStack() }) }
             composable("health") { app.mettle.ui.health.HealthScreen(onFingertip = { nav.navigate("fingertip") }, onBack = { nav.popBackStack() }) }
