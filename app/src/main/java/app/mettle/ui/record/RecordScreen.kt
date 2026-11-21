@@ -53,24 +53,38 @@ fun RecordScreen(db: app.mettle.data.db.MettleDatabase, onClose: () -> Unit, onS
     var placeId by rememberSaveable { mutableStateOf<String?>(null) }
     var selected by rememberSaveable { mutableStateOf(ActivityType.RUN) }
     var machine by rememberSaveable { mutableStateOf(false) }
-    var showNotice by rememberSaveable { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
+    // Warm up GPS while you choose, so the run starts with a good fix and the map is on you.
+    var hasLocation by androidx.compose.runtime.remember { mutableStateOf(app.mettle.ui.workout.LastFix.hasPermission(context)) }
+    var fix by androidx.compose.runtime.remember { mutableStateOf<Pair<com.google.android.gms.maps.model.LatLng, Float>?>(null) }
+    androidx.compose.runtime.LaunchedEffect(hasLocation, selected) {
+        if (!hasLocation || selected == ActivityType.STAIRS) return@LaunchedEffect
+        while (true) {
+            app.mettle.ui.workout.LastFix.fresh(context)?.let { fix = it }
+            kotlinx.coroutines.delay(if ((fix?.second ?: 99f) <= 10f) 10_000 else 3_000)
+        }
+    }
     val askLocation = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) { granted ->
         if (selected == ActivityType.STAIRS) { app.mettle.workout.WorkoutService.start(context, selected, machine, placeId); onStarted() }
-        else if (granted[android.Manifest.permission.ACCESS_FINE_LOCATION] == true) { app.mettle.workout.WorkoutService.start(context, selected); onStarted() }
+        else if (granted[android.Manifest.permission.ACCESS_FINE_LOCATION] == true) { hasLocation = true; app.mettle.workout.WorkoutService.start(context, selected); onStarted() }
     }
 
     Column(Modifier.fillMaxSize().background(MettleColors.Surface).statusBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onClose) { Icon(MettleIcons.Close, contentDescription = "Close") }
             Spacer(Modifier.weight(1f))
-            Text(if (selected == ActivityType.STAIRS) "Motion sensors ready" else "Waiting for GPS…",
+            Text(when {
+                    selected == ActivityType.STAIRS -> "Motion sensors ready"
+                    !hasLocation -> "Location needed"
+                    fix == null -> "Searching for GPS…"
+                    fix!!.second <= 20f -> "GPS ready · ±${fix!!.second.toInt()} m"
+                    else -> "Weak GPS · ±${fix!!.second.toInt()} m"
+                },
                 style = MaterialTheme.typography.titleSmall, color = MettleColors.Sub, modifier = Modifier.padding(end = 12.dp))
         }
-        // The live map arrives with GPS recording in the next build.
-        Box(Modifier.fillMaxWidth().weight(1f).background(MettleColors.Band), contentAlignment = Alignment.Center) {
-            Text("Map", style = MaterialTheme.typography.titleMedium, color = MettleColors.Muted)
-        }
+        if (selected == ActivityType.STAIRS) Box(Modifier.fillMaxWidth().weight(1f).background(MettleColors.Band), contentAlignment = Alignment.Center) {
+            Icon(MettleIcons.Stairs, contentDescription = null, tint = MettleColors.Muted, modifier = Modifier.size(64.dp))
+        } else app.mettle.ui.workout.RouteMap(emptyList(), follow = true, modifier = Modifier.fillMaxWidth().weight(1f), here = fix?.first)
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 modes.forEach { m -> ModeChip(m, m.type == selected, Modifier.weight(1f)) { selected = m.type } }
@@ -102,14 +116,6 @@ fun RecordScreen(db: app.mettle.data.db.MettleDatabase, onClose: () -> Unit, onS
         }
     }
 
-    if (showNotice) {
-        AlertDialog(
-            onDismissRequest = { showNotice = false },
-            confirmButton = { TextButton(onClick = { showNotice = false }) { Text("OK") } },
-            title = { Text("Stair workouts are coming next") },
-            text = { Text("Run, walk and hike recording work now. Stair workouts (sets, floors up and down) arrive in the next update, which installs itself.") },
-        )
-    }
 }
 
 @Composable

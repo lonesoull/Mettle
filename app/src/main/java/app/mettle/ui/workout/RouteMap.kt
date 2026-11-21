@@ -13,6 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -49,17 +50,26 @@ fun thin(points: List<Pair<Double, Double>>, max: Int = 400): List<Pair<Double, 
  * - [lite] = static picture of the route (activity details, lists): fast, no scrolling lag.
  */
 @Composable
-fun RouteMap(points: List<Pair<Double, Double>>, follow: Boolean, modifier: Modifier = Modifier, interactive: Boolean = true, lite: Boolean = false) {
+fun RouteMap(points: List<Pair<Double, Double>>, follow: Boolean, modifier: Modifier = Modifier, interactive: Boolean = true, lite: Boolean = false,
+             here: LatLng? = null) {
     if (!MapsConfig.enabled) {
         Box(modifier.background(MettleColors.Band).semantics { contentDescription = "Map" }, contentAlignment = Alignment.Center) {
             Text("Map", style = MaterialTheme.typography.titleMedium, color = MettleColors.Muted)
         }
         return
     }
+    val context = LocalContext.current
     val line = remember(points.size) { thin(points).map { LatLng(it.first, it.second) } }
-    val last = points.lastOrNull()?.let { LatLng(it.first, it.second) }
+    // Where "you" are: the newest route point, else a fresh fix passed in, else the phone's last known spot.
+    val last = points.lastOrNull()?.let { LatLng(it.first, it.second) } ?: here
+    val start = remember { last ?: LastFix.saved(context) }
     val camera = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(last ?: LatLng(12.9716, 77.5946), if (last == null) 11f else 16f)
+        position = CameraPosition.fromLatLngZoom(start ?: LatLng(20.5937, 78.9629), if (start == null) 4f else 16f)
+    }
+    // Blue "you are here" dot drawn by Google (smooth, accurate); only when location is allowed.
+    val showMe = follow && !lite && LastFix.hasPermission(context)
+    if (follow && last == null) LaunchedEffect(Unit) {
+        LastFix.quick(context)?.let { runCatching { camera.move(CameraUpdateFactory.newLatLngZoom(it, 16f)) } }
     }
     var loaded by remember { mutableStateOf(false) }
     var slow by remember { mutableStateOf(false) }
@@ -78,7 +88,7 @@ fun RouteMap(points: List<Pair<Double, Double>>, follow: Boolean, modifier: Modi
         GoogleMap(
             cameraPositionState = camera,
             googleMapOptionsFactory = { GoogleMapOptions().liteMode(lite) },
-            properties = MapProperties(isBuildingEnabled = !lite),
+            properties = MapProperties(isBuildingEnabled = !lite, isMyLocationEnabled = showMe),
             uiSettings = MapUiSettings(zoomControlsEnabled = false, mapToolbarEnabled = false, myLocationButtonEnabled = false, compassEnabled = !lite,
                 scrollGesturesEnabled = interactive && !lite, zoomGesturesEnabled = interactive && !lite,
                 rotationGesturesEnabled = interactive && !lite, tiltGesturesEnabled = interactive && !lite),
@@ -89,7 +99,6 @@ fun RouteMap(points: List<Pair<Double, Double>>, follow: Boolean, modifier: Modi
                 Polyline(points = line, color = MettleColors.Orange, width = 9f, zIndex = 2f)
             }
             line.firstOrNull()?.let { Circle(center = it, radius = 6.0, fillColor = MettleColors.Good, strokeColor = MettleColors.Surface, strokeWidth = 6f, zIndex = 3f) }
-            if (follow && last != null) Circle(center = last, radius = 7.0, fillColor = MettleColors.Descent, strokeColor = MettleColors.Surface, strokeWidth = 8f, zIndex = 4f)
         }
         if (slow) {
             Text("Map is slow to load. Check your internet connection.", style = MaterialTheme.typography.bodyMedium,
