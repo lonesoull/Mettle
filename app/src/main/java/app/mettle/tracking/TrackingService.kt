@@ -92,6 +92,7 @@ class TrackingService : Service(), SensorEventListener {
                 )
             }
             points.forEach { db.track().insert(it) }
+            points.lastOrNull()?.let { Diag.put(this@TrackingService, "fix", "±${it.accuracyM?.toInt() ?: "?"} m") }
             points.lastOrNull()?.let { app.mettle.ui.workout.LastFix.save(this@TrackingService, it.lat, it.lon) }
             }
         }
@@ -112,6 +113,7 @@ class TrackingService : Service(), SensorEventListener {
         startInForeground()
         if (!TrackingState.running) {
             TrackingState.running = true
+            Diag.log(this, "Tracker started")
             recordGapSinceLastHeartbeat()
             prefs.edit().putLong(KEY_SERVICE_START, System.currentTimeMillis()).apply()
             registerSensors()
@@ -123,6 +125,7 @@ class TrackingService : Service(), SensorEventListener {
     }
 
     override fun onDestroy() {
+        if (TrackingState.running) Diag.log(this, "Tracker stopped")
         TrackingState.running = false
         sensors.unregisterListener(this)
         sensors.unregisterListener(fallListener); fallRegistered = false
@@ -156,7 +159,7 @@ class TrackingService : Service(), SensorEventListener {
             (Build.VERSION.SDK_INT >= 34 && runCatching { ServiceCompat.startForeground(this, NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH) }.isSuccess) ||
             (Build.VERSION.SDK_INT >= 29 && type and ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION != 0 &&
                 runCatching { ServiceCompat.startForeground(this, NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION) }.isSuccess)
-        if (!ok) { stopSelf(); return }
+        if (!ok) { Diag.log(this, "Android refused to start tracking in the background"); stopSelf(); return }
     }
 
     private fun notification(text: String): Notification {
@@ -233,6 +236,7 @@ class TrackingService : Service(), SensorEventListener {
                     delta <= 0 -> Unit
                     // Steps taken while tracking was stopped (update, battery saver, restart): spread them over the gap.
                     gapMin >= 3 && delta > 250 -> {
+                        Diag.log(this, "Caught up $delta steps over $gapMin min")
                         val usable = delta.coerceAtMost(gapMin * 200L).coerceAtMost(60_000L)
                         val per = (usable / gapMin).toInt(); var rest = (usable - per.toLong() * gapMin).toInt()
                         for (m in 0 until gapMin) { val n = per + if (rest-- > 0) 1 else 0; if (n > 0) addSteps(lastT + (m + 1) * 60_000L, n) }
@@ -377,6 +381,7 @@ class TrackingService : Service(), SensorEventListener {
         }
         if (bucket == locationState) return
         locationState = bucket
+        Diag.log(this, "GPS mode: " + when (bucket) { DayState.RUNNING -> "fast (moving/travelling)"; DayState.WALKING -> "walking"; else -> "still" })
         val request = when (bucket) {
             DayState.RUNNING -> LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 20_000L).setMinUpdateDistanceMeters(10f).build()
             DayState.WALKING -> LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 30_000L).setMinUpdateDistanceMeters(8f).build()
@@ -419,6 +424,7 @@ class TrackingService : Service(), SensorEventListener {
         val reason = if (bootAt > last) "phone_off" else "app_stopped"
         val pending = org.json.JSONArray(prefs.getString(KEY_GAPS, "[]"))
         pending.put(org.json.JSONObject().put("start", last).put("end", now).put("reason", reason))
+        Diag.log(this, "Gap: not tracking for ${(now - last) / 60_000} min ($reason)")
         prefs.edit().putString(KEY_GAPS, pending.toString()).apply()
     }
 
@@ -454,6 +460,7 @@ class ActivityReceiver : BroadcastReceiver() {
         val result = ActivityRecognitionResult.extractResult(intent) ?: return
         val a = result.mostProbableActivity
         if (a.confidence < 50) return
+        val before = TrackingState.sensorState
         TrackingState.sensorState = when (a.type) {
             DetectedActivity.STILL -> DayState.STILL
             DetectedActivity.WALKING, DetectedActivity.ON_FOOT -> DayState.WALKING
@@ -462,12 +469,15 @@ class ActivityReceiver : BroadcastReceiver() {
             DetectedActivity.ON_BICYCLE -> DayState.CYCLING
             else -> TrackingState.sensorState
         }
+        Diag.put(context, "activity", "${TrackingState.sensorState.name.lowercase()} (${a.confidence}%)")
+        if (TrackingState.sensorState != before) Diag.log(context, "Android detected: ${TrackingState.sensorState.name.lowercase()} (${a.confidence}%)")
     }
 }
 
 /** Restarts tracking after the phone reboots or Mettle updates. */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (TrackingService.isEnabled(context)) runCatching { TrackingService.start(context) }
+        Diag.log(context, if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) "App updated: restarting tracker" else "Phone restarted: restarting tracker")
+        if (TrackingService.isEnabled(context)) runCatching { TrackingService.start(context) }.onFailure { Diag.log(context, "Restart failed: ${it.javaClass.simpleName}") }
     }
 }

@@ -16,7 +16,8 @@ import java.util.concurrent.TimeUnit
 class TrackingWatchdog(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         if (TrackingService.isEnabled(applicationContext) && !TrackingState.running) {
-            runCatching { TrackingService.start(applicationContext) }
+            Diag.log(applicationContext, "Watchdog: tracker wasn't running, restarting")
+            runCatching { TrackingService.start(applicationContext) }.onFailure { Diag.log(applicationContext, "Watchdog restart failed: ${it.javaClass.simpleName}") }
         }
         return Result.success()
     }

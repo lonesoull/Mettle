@@ -107,7 +107,7 @@ fun MettleApp(db: MettleDatabase, profile: Profile, onSignOut: () -> Unit, onPro
                 YouScreen(profile,
                     onEditProfile = { nav.navigate("editprofile") }, onSafety = { nav.navigate("safety") }, onHealth = { nav.navigate("health") },
                     onTracking = { nav.navigate("setup") }, onTransfer = { nav.navigate("transfer") }, onSensorLab = { nav.navigate("sensorlab") },
-                    onAdmin = { nav.navigate("admin") }, onSignedOut = onSignOut)
+                    onAdmin = { nav.navigate("admin") }, onSignedOut = onSignOut, onTrackingCheck = { nav.navigate("trackingcheck") })
             }
 
             // ---- Recording flow (full screen, no tab bar)
@@ -135,6 +135,7 @@ fun MettleApp(db: MettleDatabase, profile: Profile, onSignOut: () -> Unit, onPro
                 app.mettle.ui.workout.ActivityDetailScreen(db, id, onBack = { nav.popBackStack() }, onOpenMap = { nav.navigate("activitymap/$id") })
             }
             composable("activitymap/{id}") { e -> app.mettle.ui.workout.ActivityMapScreen(db, e.arguments?.getString("id") ?: "", onBack = { nav.popBackStack() }) }
+            composable("trackingcheck") { app.mettle.ui.tracking.TrackingCheckScreen(db, onSetup = { nav.navigate("setup") }, onBack = { nav.popBackStack() }) }
             composable("setup") { app.mettle.ui.tracking.TrackingSetupScreen(onDone = { nav.popBackStack() }, onBack = { nav.popBackStack() }) }
             composable("safety") { app.mettle.ui.safety.SafetyScreen(onBack = { nav.popBackStack() }) }
             composable("health") { app.mettle.ui.health.HealthScreen(onFingertip = { nav.navigate("fingertip") }, onBack = { nav.popBackStack() }) }

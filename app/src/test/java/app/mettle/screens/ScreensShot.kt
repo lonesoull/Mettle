@@ -128,5 +128,6 @@ class ScreensShot {
         route = (0..120).map { i -> val a = i / 160.0 * 2 * Math.PI; 12.9815 + 0.006 * sin(a) to 77.6195 + 0.004 * cos(a) })
     @Config(qualifiers = "w411dp-h891dp-xxhdpi") @Test fun recordingMap() { app.mettle.workout.WorkoutService.state.value = liveRun(); shot("11-recording-map") { app.mettle.ui.workout.RecordingScreen {} } }
     @Config(qualifiers = "w411dp-h891dp-xxhdpi") @Test fun recordingPaused() { app.mettle.workout.WorkoutService.state.value = liveRun(paused = true); shot("12-recording-paused") { app.mettle.ui.workout.RecordingScreen {} } }
+    @Test fun trackingCheck() { app.mettle.tracking.Diag.log(ApplicationProvider.getApplicationContext(), "Tracker started"); shot("13-tracking-check") { app.mettle.ui.tracking.TrackingCheckScreen(db, {}, {}) } }
     @Test fun setup() = shot("10-setup") { app.mettle.ui.tracking.TrackingSetupScreen(onDone = {}) }
 }

@@ -45,6 +45,7 @@ import kotlinx.coroutines.launch
 fun YouScreen(
     profile: Profile, onEditProfile: () -> Unit, onSafety: () -> Unit, onHealth: () -> Unit, onTracking: () -> Unit,
     onTransfer: () -> Unit, onSensorLab: () -> Unit, onAdmin: () -> Unit, onSignedOut: () -> Unit,
+    onTrackingCheck: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -70,6 +71,8 @@ fun YouScreen(
                 ListRow("Health & devices", "Heart rate, readiness, straps, sleep", MettleIcons.Heart, MettleColors.Orange, onClick = onHealth)
                 Divider()
                 ListRow("All-day tracking", "Permissions and battery settings", MettleIcons.Activity, MettleColors.Good, onClick = onTracking)
+                Divider()
+                ListRow("Tracking check", "Is tracking working? Fix problems, send diagnostics", MettleIcons.Info, MettleColors.Descent, onClick = onTrackingCheck)
             }
             Group {
                 ListRow("Import & export", "GPX files, Strava archive, CSV", MettleIcons.Swap, MettleColors.Descent, onClick = onTransfer)
