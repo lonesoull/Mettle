@@ -17,6 +17,8 @@ data class Sample(
     val altitudeM: Double?,
     val pressureHpa: Float?,
     val steps: Int?,          // cumulative steps since start
+    val speedMs: Float? = null,   // GPS chip (Doppler) speed: far more accurate than position differences
+    val segment: Int = 0,         // increases after each manual pause, so paused travel is never counted
 )
 
 data class Split(val index: Int, val distanceM: Int, val movingS: Int, val elevChangeM: Double)
@@ -64,40 +66,81 @@ object WorkoutMath {
         return 155.4 * g.pow(5) - 30.4 * g.pow(4) - 43.3 * g.pow(3) + 46.3 * g.pow(2) + 19.5 * g + 3.6
     }
 
+    /**
+     * Position smoother (Kalman filter, position-only). Each GPS fix is trusted according to its
+     * reported accuracy, which removes the ±3–5 m wobble that inflates distance, without cutting corners.
+     */
+    private class Smoother(private val qMps: Double) {
+        var lat = 0.0; var lon = 0.0; private var variance = -1.0; private var lastT = 0L
+        fun reset() { variance = -1.0 }
+        fun add(la: Double, lo: Double, accuracy: Double, tMs: Long) {
+            val acc = accuracy.coerceAtLeast(1.0)
+            if (variance < 0) { lat = la; lon = lo; variance = acc * acc; lastT = tMs; return }
+            val dt = (tMs - lastT) / 1000.0
+            if (dt > 0) { variance += dt * qMps * qMps; lastT = tMs }
+            val k = variance / (variance + acc * acc)
+            lat += k * (la - lat); lon += k * (lo - lon)
+            variance *= (1 - k)
+        }
+    }
+
     fun analyse(samples: List<Sample>): WorkoutResult {
         val sorted = samples.sortedBy { it.tMs }
         val start = sorted.firstOrNull()?.tMs ?: 0L
         val end = sorted.lastOrNull()?.tMs ?: 0L
-        val pts = sorted.filter { it.lat != null && it.lon != null && (it.accuracyM ?: 0f) <= MAX_ACCURACY_M }
+        // GPS warm-up: skip the first rough fixes until the receiver has a good lock.
+        val firstGood = sorted.indexOfFirst { it.lat != null && (it.accuracyM ?: 0f) <= 20f }
+        val pts = if (firstGood < 0) emptyList() else
+            sorted.drop(firstGood).filter { it.lat != null && it.lon != null && (it.accuracyM ?: 0f) <= MAX_ACCURACY_M }
         val useBaro = pts.count { it.pressureHpa != null } > pts.size / 2
+        val hasDoppler = pts.count { it.speedMs != null } > pts.size / 2
+
+        // Altitude: barometer if present, else GPS height averaged over ±15 s (GPS height alone jumps by metres).
+        val rawAlt = pts.map { p -> if (useBaro) p.pressureHpa?.let { pressureAltitudeM(it) } else p.altitudeM }
+        val smoothAlts = ArrayList<Double?>(pts.size)
+        run {
+            var lo = 0; var hi = 0; var sum = 0.0; var n = 0
+            val win = if (useBaro) 5_000L else 15_000L
+            for (i in pts.indices) {
+                while (hi < pts.size && pts[hi].tMs <= pts[i].tMs + win) { rawAlt[hi]?.let { sum += it; n++ }; hi++ }
+                while (lo < i && pts[lo].tMs < pts[i].tMs - win) { rawAlt[lo]?.let { sum -= it; n-- }; lo++ }
+                smoothAlts += if (n > 0) sum / n else null
+            }
+        }
 
         val t = ArrayList<Int>(); val lat = ArrayList<Double>(); val lon = ArrayList<Double>()
         val dist = ArrayList<Double>(); val alt = ArrayList<Double?>(); val moving = ArrayList<Boolean>()
         var total = 0.0
         var stillSince: Long? = null
-        var smoothAlt: Double? = null
+        val smoother = Smoother(3.0)
+        var prevLat = 0.0; var prevLon = 0.0; var prevT = 0L; var prevSeg = -1
         for ((i, p) in pts.withIndex()) {
-            val rawAlt = if (useBaro) p.pressureHpa?.let { pressureAltitudeM(it) } else p.altitudeM
-            smoothAlt = when {
-                rawAlt == null -> smoothAlt
-                smoothAlt == null -> rawAlt
-                else -> smoothAlt + 0.25 * (rawAlt - smoothAlt)
-            }
+            if (p.segment != prevSeg) smoother.reset()           // after a pause: start a fresh line, don't bridge the gap
+            smoother.add(p.lat!!, p.lon!!, (p.accuracyM ?: 5f).toDouble(), p.tMs)
+            val la = smoother.lat; val lo = smoother.lon
             var isMoving = true
-            if (i > 0) {
-                val prev = pts[i - 1]
-                val d = haversineM(prev.lat!!, prev.lon!!, p.lat!!, p.lon!!)
-                val dt = (p.tMs - prev.tMs) / 1000.0
-                val speed = if (dt > 0) d / dt else 0.0
+            if (i > 0 && p.segment == prevSeg) {
+                val d = haversineM(prevLat, prevLon, la, lo)
+                val dt = (p.tMs - prevT) / 1000.0
+                val implied = if (dt > 0) d / dt else 0.0
+                // Moving or stopped: trust the GPS chip's own speed when it reports one.
+                val speed = if (hasDoppler && p.speedMs != null) p.speedMs.toDouble() else implied
                 if (speed < MOVING_SPEED) {
-                    if (stillSince == null) stillSince = prev.tMs
+                    if (stillSince == null) stillSince = prevT
                     if ((p.tMs - stillSince!!) / 1000 >= AUTO_PAUSE_AFTER_S) isMoving = false
                 } else stillSince = null
-                // Ignore GPS jitter while standing still, and impossible jumps.
-                if (isMoving && speed < 12.5) total += d
-            }
-            t += ((p.tMs - start) / 1000).toInt(); lat += p.lat!!; lon += p.lon!!
-            dist += total; alt += smoothAlt; moving += isMoving
+                // Reject impossible jumps (multipath next to buildings): far faster than the chip says you're going.
+                val jump = implied > 12.5 || (hasDoppler && p.speedMs != null && dt <= 5 && implied > p.speedMs * 3 + 4)
+                // Distance: integrate the GPS chip's speed (unaffected by position wobble) when available,
+                // falling back to the smoothed track across gaps or on phones without it.
+                val prevSpeed = pts[i - 1].speedMs
+                val step = if (hasDoppler && p.speedMs != null && prevSpeed != null && dt in 0.0..5.0)
+                    ((p.speedMs + prevSpeed) / 2.0) * dt else d
+                if (isMoving && !jump) total += step
+            } else stillSince = null
+            prevLat = la; prevLon = lo; prevT = p.tMs; prevSeg = p.segment
+            t += ((p.tMs - start) / 1000).toInt(); lat += la; lon += lo
+            dist += total; alt += smoothAlts[i]; moving += isMoving
         }
 
         var movingS = 0
@@ -108,7 +151,7 @@ object WorkoutMath {
         if (pts.isEmpty()) movingS = ((end - start) / 1000).toInt()
 
         // Elevation with a dead band, so sensor noise doesn't add fake climbing.
-        val band = if (useBaro) 1.0 else 4.0
+        val band = if (useBaro) 1.0 else 3.0
         var gain = 0.0; var loss = 0.0; var ref: Double? = null
         for (a in alt) {
             if (a == null) continue

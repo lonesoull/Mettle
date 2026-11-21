@@ -2,6 +2,7 @@ package app.mettle.workout
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -91,6 +92,7 @@ class WorkoutService : Service(), SensorEventListener {
     private var stepsPerFloor = 22
     private var floorHeight = 3.0
     private var spokenKm = 0
+    @Volatile private var segment = 0
     private val db get() = (application as MettleApplication).database
 
     private val locationCallback = object : LocationCallback() {
@@ -101,7 +103,7 @@ class WorkoutService : Service(), SensorEventListener {
                 // Sea-level height (not GPS ellipsoid height); the correction is prepared once per area off the main thread.
                 if (!app.mettle.tracking.Msl.ready(l)) { val copy = android.location.Location(l); scope.launch(kotlinx.coroutines.Dispatchers.IO) { app.mettle.tracking.Msl.prepare(this@WorkoutService, copy) } }
                 val s = Sample(l.time, l.latitude, l.longitude, if (l.hasAccuracy()) l.accuracy else null,
-                    app.mettle.tracking.Msl.corrected(l), pressure, steps)
+                    app.mettle.tracking.Msl.corrected(l), pressure, steps, if (l.hasSpeed()) l.speed else null, segment)
                 synchronized(samples) { if (!live.paused) samples += s }
                 scope.launch {
                     db.recording().insert(RecordingSampleEntity(
@@ -127,8 +129,8 @@ class WorkoutService : Service(), SensorEventListener {
             ACTION_START -> begin(ActivityType.valueOf(intent.getStringExtra(EXTRA_TYPE) ?: "RUN"),
                 intent.getBooleanExtra(EXTRA_MACHINE, false), intent.getStringExtra(EXTRA_PLACE))
             ACTION_LAP -> lap()
-            ACTION_PAUSE -> state.value = state.value.copy(paused = true)
-            ACTION_RESUME -> state.value = state.value.copy(paused = false)
+            ACTION_PAUSE -> { state.value = state.value.copy(paused = true); speak("Workout paused"); refreshNotification() }
+            ACTION_RESUME -> { segment++; state.value = state.value.copy(paused = false); speak("Workout resumed"); refreshNotification() }
             ACTION_FINISH -> { finish(); return START_NOT_STICKY }
         }
         return START_STICKY
@@ -158,7 +160,7 @@ class WorkoutService : Service(), SensorEventListener {
             requestLocation()
         }
         sensors.getDefaultSensor(Sensor.TYPE_PRESSURE)?.let { sensors.registerListener(this, it, 500_000) }
-        spokenKm = 0
+        spokenKm = 0; segment = 0
         tts = android.speech.tts.TextToSpeech(this) { ok -> if (ok == android.speech.tts.TextToSpeech.SUCCESS) tts?.language = java.util.Locale.getDefault() }
         scope.launch { ticker() }
     }
@@ -192,8 +194,7 @@ class WorkoutService : Service(), SensorEventListener {
                     setNo = r.sets.size + (if (r.sets.lastOrNull()?.floorsDown ?: 1 > 0) 1 else 0).coerceAtLeast(1),
                     climbing = if (!active) null else lastBout!!.direction == app.mettle.stairs.Direction.UP || (lastBout.direction == app.mettle.stairs.Direction.FLAT && !state.value.hasBarometer),
                 )
-                if (n++ % 5 == 0) getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID,
-                    notification("▲ ${r.floorsUp} floors · ▼ ${r.floorsDown} · ${Fmt.duration(state.value.elapsedS.toLong())}"))
+                if (n++ % 2 == 0) refreshNotification()
                 delay(2000)
                 continue
             }
@@ -206,22 +207,28 @@ class WorkoutService : Service(), SensorEventListener {
             state.value = state.value.copy(
                 elapsedS = ((now - state.value.startedAt) / 1000).toInt(),
                 movingS = r.movingS, distanceM = r.distanceM, avgPaceSKm = r.avgPaceSKm,
-                currentPaceSKm = recentR?.takeIf { it.distanceM >= 15 && !autoPaused }?.let { it.movingS / (it.distanceM / 1000.0) },
+                currentPaceSKm = run {
+                    val sp = snapshot.filter { it.tMs >= now - 10_000 && it.speedMs != null && (it.accuracyM ?: 99f) <= 20f }.mapNotNull { it.speedMs }
+                    when {
+                        autoPaused || state.value.paused -> null
+                        sp.size >= 3 -> sp.average().takeIf { it >= WorkoutMath.MOVING_SPEED }?.let { 1000.0 / it }
+                        else -> recentR?.takeIf { it.distanceM >= 15 }?.let { it.movingS / (it.distanceM / 1000.0) }
+                    }
+                },
                 elevGainM = r.elevGainM, route = r.lat.indices.map { r.lat[it] to r.lon[it] }, autoPaused = autoPaused,
             )
             // Voice coach: announce every kilometre.
             val km = state.value.distanceM / 1000
             if (km > spokenKm && !state.value.paused) {
                 spokenKm = km
+                val split = r.splits.getOrNull(km - 1)?.movingS
                 val pace = state.value.avgPaceSKm?.toInt()
-                val text = "Kilometre $km. Time ${state.value.movingS / 60} minutes." +
+                val text = "Distance $km kilometre${if (km > 1) "s" else ""}. Time ${spokenTime(state.value.movingS)}." +
+                    (split?.let { " Split pace ${it / 60} minutes ${it % 60} seconds." } ?: "") +
                     (pace?.let { " Average pace ${it / 60} minutes ${it % 60} seconds per kilometre." } ?: "")
-                tts?.speak(text, android.speech.tts.TextToSpeech.QUEUE_ADD, null, "km$km")
+                speak(text)
             }
-            if (n++ % 5 == 0) {
-                getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID,
-                    notification("${Fmt.duration(state.value.movingS.toLong())} · ${Fmt.km2(state.value.distanceM.toLong())} km · ${Fmt.pace(state.value.avgPaceSKm)} /km"))
-            }
+            if (n++ % 2 == 0) refreshNotification()
             delay(2000)
         }
     }
@@ -290,13 +297,41 @@ class WorkoutService : Service(), SensorEventListener {
         ServiceCompat.startForeground(this, NOTIFICATION_ID, notification("Recording started"), type)
     }
 
-    private fun notification(text: String) = NotificationCompat.Builder(this, CHANNEL)
-        .setSmallIcon(R.drawable.ic_stat_mettle)
-        .setContentTitle("Mettle · recording")
-        .setContentText(text)
-        .setOngoing(true).setSilent(true)
-        .setContentIntent(PendingIntent.getActivity(this, 1, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
-        .build()
+    private fun action(act: String, code: Int) =
+        PendingIntent.getService(this, code, Intent(this, WorkoutService::class.java).setAction(act), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+
+    /** Lock-screen notification with live stats and Pause / Resume / Finish buttons. */
+    private fun notification(text: String): Notification {
+        val live = state.value
+        val b = NotificationCompat.Builder(this, CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat_mettle)
+            .setContentTitle(when { live.paused -> "Paused"; live.autoPaused -> "Auto-paused"; else -> "Recording " + live.type.name.lowercase() })
+            .setContentText(text)
+            .setOngoing(true).setSilent(true).setOnlyAlertOnce(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setCategory(NotificationCompat.CATEGORY_WORKOUT)
+            .setUsesChronometer(!live.paused && live.startedAt > 0).setWhen(System.currentTimeMillis() - live.movingS * 1000L)
+            .setContentIntent(PendingIntent.getActivity(this, 1, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
+        if (live.recording) {
+            if (live.paused) b.addAction(0, "Resume", action(ACTION_RESUME, 11)) else b.addAction(0, "Pause", action(ACTION_PAUSE, 12))
+            if (live.type == ActivityType.STAIRS) b.addAction(0, "New set", action(ACTION_LAP, 13))
+        }
+        return b.build()
+    }
+
+    private fun refreshNotification() {
+        val l = state.value
+        val text = if (l.type == ActivityType.STAIRS) "▲ ${l.floorsUp} floors · ▼ ${l.floorsDown}"
+            else "${Fmt.km2(l.distanceM.toLong())} km · ${Fmt.pace(l.currentPaceSKm ?: l.avgPaceSKm)} /km" + (l.heartRate?.let { " · $it bpm" } ?: "")
+        runCatching { getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(text)) }
+    }
+
+    private fun speak(text: String) { if (VoicePrefs.enabled(this)) tts?.speak(text, android.speech.tts.TextToSpeech.QUEUE_ADD, null, text.hashCode().toString()) }
+
+    private fun spokenTime(s: Int): String {
+        val h = s / 3600; val m = (s % 3600) / 60; val sec = s % 60
+        return (if (h > 0) "$h hour${if (h > 1) "s" else ""} " else "") + "$m minute${if (m != 1) "s" else ""} $sec second${if (sec != 1) "s" else ""}"
+    }
 
     companion object {
         const val CHANNEL = "workout"
@@ -332,4 +367,12 @@ class WorkoutService : Service(), SensorEventListener {
         }
         fun clearSession(c: Context) = c.getSharedPreferences("workout", MODE_PRIVATE).edit().clear().apply()
     }
+}
+
+/** Voice coach on/off (spoken km splits and pause/resume). */
+object VoicePrefs {
+    fun enabled(c: Context) = c.getSharedPreferences("workout_prefs", Context.MODE_PRIVATE).getBoolean("voice", true)
+    fun set(c: Context, on: Boolean) = c.getSharedPreferences("workout_prefs", Context.MODE_PRIVATE).edit().putBoolean("voice", on).apply()
+    fun keepScreenOn(c: Context) = c.getSharedPreferences("workout_prefs", Context.MODE_PRIVATE).getBoolean("screen_on", false)
+    fun setKeepScreenOn(c: Context, on: Boolean) = c.getSharedPreferences("workout_prefs", Context.MODE_PRIVATE).edit().putBoolean("screen_on", on).apply()
 }

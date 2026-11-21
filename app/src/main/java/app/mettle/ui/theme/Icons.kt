@@ -44,5 +44,11 @@ object MettleIcons {
     val Logout = icon("logout", "M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10")
     val Info = icon("info", "M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18M12 11v6M12 7.5v.5")
     val Play = icon("play", "M7 4l13 8-13 8z", filled = true)
+    val Map = icon("map", "M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14")
+    val Stats = icon("stats", "M4 5h16M4 12h16M4 19h10", stroke = 2.2f)
+    val Volume = icon("volume", "M4 9v6h4l5 4V5L8 9zM16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11")
+    val VolumeOff = icon("volume_off", "M4 9v6h4l5 4V5L8 9zM16 9l5 6M21 9l-5 6")
+    val Sun = icon("sun", "M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4")
+    val Stop = icon("stop", "M7 7h10v10H7z")
     val Pause = icon("pause", "M7 4h4v16H7zM13 4h4v16h-4z", filled = true)
 }

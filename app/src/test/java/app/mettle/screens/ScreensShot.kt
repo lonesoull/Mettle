@@ -111,5 +111,10 @@ class ScreensShot {
     @Test fun record() = shot("7-record") { app.mettle.ui.record.RecordScreen(db, {}, {}, {}) }
     @Test fun safety() = shot("8-safety") { app.mettle.ui.safety.SafetyScreen(onBack = {}) }
     @Test fun health() = shot("9-health") { app.mettle.ui.health.HealthScreen(onFingertip = {}, onBack = {}) }
+    private fun liveRun(paused: Boolean = false) = app.mettle.workout.LiveWorkout(sessionId = "x", recording = true, paused = paused, startedAt = 1,
+        elapsedS = 1530, movingS = 1490, distanceM = 4870, currentPaceSKm = 302.0, avgPaceSKm = 306.0, elevGainM = 23.0, gpsAccuracyM = 4f,
+        route = (0..120).map { i -> val a = i / 160.0 * 2 * Math.PI; 12.9815 + 0.006 * sin(a) to 77.6195 + 0.004 * cos(a) })
+    @Config(qualifiers = "w411dp-h891dp-xxhdpi") @Test fun recordingMap() { app.mettle.workout.WorkoutService.state.value = liveRun(); shot("11-recording-map") { app.mettle.ui.workout.RecordingScreen {} } }
+    @Config(qualifiers = "w411dp-h891dp-xxhdpi") @Test fun recordingPaused() { app.mettle.workout.WorkoutService.state.value = liveRun(paused = true); shot("12-recording-paused") { app.mettle.ui.workout.RecordingScreen {} } }
     @Test fun setup() = shot("10-setup") { app.mettle.ui.tracking.TrackingSetupScreen(onDone = {}) }
 }

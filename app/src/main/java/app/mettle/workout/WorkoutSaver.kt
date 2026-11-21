@@ -53,7 +53,12 @@ object WorkoutSaver {
         val db = (context.applicationContext as MettleApplication).database
         val raw = db.recording().samples(sessionId)
         if (type == ActivityType.STAIRS) return saveStairs(context, sessionId, startedAt, details, raw)
-        val samples = raw.filter { !it.paused }.map { Sample(it.tMs, it.lat, it.lon, it.accuracyM, it.altitudeM, it.pressureHpa, it.steps) }
+        // Each manual pause starts a new segment, so distance is never bridged across a pause.
+        var seg = 0; var wasPaused = false
+        val samples = raw.mapNotNull { r ->
+            if (r.paused) { wasPaused = true; null }
+            else { if (wasPaused) { seg++; wasPaused = false }; Sample(r.tMs, r.lat, r.lon, r.accuracyM, r.altitudeM, r.pressureHpa, r.steps, r.speedMs, seg) }
+        }
         val r = WorkoutMath.analyse(samples)
         val id = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
