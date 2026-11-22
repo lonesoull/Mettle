@@ -47,3 +47,40 @@ class StillDayTest {
         assertEquals(trip.size, kept.size)
     }
 }
+
+class StepGateTest {
+    private val lat0 = 12.9850; private val lon0 = 80.2400; private val mLat = 111_320.0
+    private fun pt(min: Int, northM: Double, acc: Float = 5f) = TrackPt(min * 60_000L, lat0 + northM / mLat, lon0, acc, null)
+
+    @Test fun sharpWrongFixesWithoutStepsStayHome() {
+        // At home; at 9:00-9:03 four sharp (±4 m) fixes say 50 m north (the 22 Nov main-street line). 0 steps.
+        val pts = (0..60).map { pt(it, 0.0) } + (61..64).map { pt(it, 50.0, 4f) } + (65..120).map { pt(it, 0.0) }
+        val out = StayMath.anchorToSteps(pts) { _, _ -> 0.0 }
+        assertTrue(out.all { WorkoutMath.haversineM(lat0, lon0, it.lat, it.lon) < 1 })
+    }
+
+    @Test fun realWalkWithStepsIsKept() {
+        // Walk 300 m north over 5 minutes with ~100 steps a minute.
+        val pts = (0..5).map { pt(it, it * 60.0) }
+        val out = StayMath.anchorToSteps(pts) { t0, t1 -> ((t1 - t0) / 60_000.0) * 100 * 0.72 * 1.3 }
+        assertEquals(300.0, WorkoutMath.haversineM(lat0, lon0, out.last().lat, out.last().lon), 1.0)
+    }
+
+    @Test fun wrongStartingPointCorrectsItself() {
+        // First fix is 80 m off, then 20 minutes of consistent fixes at the true spot, no steps.
+        val pts = listOf(pt(0, 80.0)) + (1..20).map { pt(it, 0.0) }
+        val out = StayMath.anchorToSteps(pts) { _, _ -> 0.0 }
+        assertTrue(WorkoutMath.haversineM(lat0, lon0, out.last().lat, out.last().lon) < 1)
+    }
+}
+
+class StepGateLongErrorTest {
+    private val lat0 = 12.9850; private val lon0 = 80.2400; private val mLat = 111_320.0
+    private fun pt(min: Int, northM: Double) = TrackPt(min * 60_000L, lat0 + northM / mLat, lon0, 5f, null)
+
+    @Test fun twentyMinutesOfWrongFixesAfterHoursAtHomeDoNotMoveYou() {
+        val pts = (0..180).map { pt(it, 0.0) } + (181..200).map { pt(it, 50.0) } + (201..240).map { pt(it, 0.0) }
+        val out = StayMath.anchorToSteps(pts) { _, _ -> 0.0 }
+        org.junit.Assert.assertTrue(out.all { WorkoutMath.haversineM(lat0, lon0, it.lat, it.lon) < 1 })
+    }
+}

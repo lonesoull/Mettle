@@ -53,6 +53,43 @@ object StayMath {
     }
 
     /**
+     * Movement must be explained by your body: a new position only counts if the steps you took
+     * since the last trusted position could cover the distance (or you were in a vehicle, or the
+     * tracker has no step data for that time). Otherwise the point is GPS error and you're kept
+     * where you were. [budgetM] returns how far you could have gone between two times, or null
+     * for "unknown / unlimited".
+     *
+     * If several rejected points in a row agree with each other, the trusted position itself was
+     * wrong, so it moves to them.
+     */
+    fun anchorToSteps(points: List<TrackPt>, budgetM: (Long, Long) -> Double?): List<TrackPt> {
+        if (points.isEmpty()) return points
+        val out = ArrayList<TrackPt>(points.size)
+        var anchor = points[0]; out += anchor
+        var support = 1                       // how many accepted points back up the current position
+        val rejected = ArrayList<TrackPt>()
+        for (k in 1 until points.size) {
+            val p = points[k]
+            val dist = WorkoutMath.haversineM(anchor.lat, anchor.lon, p.lat, p.lon)
+            val budget = budgetM(anchor.tMs, p.tMs)
+            val slack = 12.0 + minOf(30.0, ((anchor.accuracyM ?: 10f) + (p.accuracyM ?: 10f)).toDouble() / 2)
+            if (budget == null || dist <= budget + slack) {
+                support = if (dist <= 30) support + 1 else 1
+                anchor = p; rejected.clear(); out += p
+            } else {
+                // Keep only the run of rejected points that agree with this one.
+                rejected.removeAll { WorkoutMath.haversineM(p.lat, p.lon, it.lat, it.lon) > 30 }
+                rejected += p
+                // Switch only if the other spot now has more evidence than where we think you are.
+                val agree = rejected.size >= 6 && rejected.size > support && rejected.last().tMs - rejected.first().tMs >= 10 * 60_000L
+                if (agree) { anchor = p; support = rejected.size; rejected.clear(); out += p }
+                else out += p.copy(lat = anchor.lat, lon = anchor.lon)
+            }
+        }
+        return out
+    }
+
+    /**
      * For drawing: while you stay in one spot, wobbling fixes are replaced by that spot's centre,
      * so the map shows a dot instead of a scribble. Movement is kept as recorded.
      */

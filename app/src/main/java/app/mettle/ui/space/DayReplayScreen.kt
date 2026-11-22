@@ -76,11 +76,32 @@ fun DayReplayScreen(title: String, places: List<KnownPlace>, db: app.mettle.data
     val date = LocalDate.parse(day)
     val points by produceState<List<ReplayPoint>?>(null, day) { value = null; value = runCatching { load(date) }.getOrDefault(emptyList()) }
     // Clean out vague and jumping Wi-Fi/cell fixes, then pin wobble while you stay put.
-    val pts = remember(points) {
+    // On your own phone, steps decide whether a position change was real movement.
+    val ctxBody = androidx.compose.ui.platform.LocalContext.current
+    val minutes by produceState<List<app.mettle.data.db.DayMinuteEntity>?>(null, day, db) {
+        value = db?.let { d -> runCatching { d.day().minutesNow(day) }.getOrNull() }
+    }
+    val pts = remember(points, minutes) {
         val raw = points.orEmpty().sortedBy { it.tMs }
         val tp = raw.map { TrackPt(it.tMs, it.lat, it.lon, it.accuracyM, it.altitudeM) }
         val keep = StayMath.clean(tp)
-        val settled = StayMath.settle(keep.map { tp[it] })
+        var kept = keep.map { tp[it] }
+        val mins = minutes
+        if (!mins.isNullOrEmpty()) {
+            val stride = app.mettle.tracking.Pdr.strideFor(app.mettle.sync.ProfileCache.body(ctxBody).heightCm)
+            val byMin = mins.associateBy { it.minute }
+            val dayStart = date.atStartOfDay(zone).toInstant().toEpochMilli()
+            kept = StayMath.anchorToSteps(kept) { t0, t1 ->
+                val m0 = ((t0 - dayStart) / 60_000).toInt(); val m1 = ((t1 - dayStart) / 60_000).toInt()
+                var steps = 0; var known = 0; var unlimited = false
+                for (m in m0..m1) byMin[m]?.let { r ->
+                    known++; steps += r.steps
+                    if (r.state in setOf(app.mettle.data.db.DayState.VEHICLE, app.mettle.data.db.DayState.CYCLING, app.mettle.data.db.DayState.RUNNING)) unlimited = true
+                }
+                if (unlimited || known < (m1 - m0 + 1) / 2) null else steps * stride * 1.3
+            }
+        }
+        val settled = StayMath.settle(kept)
         keep.mapIndexed { k, i -> raw[i].copy(lat = settled[k].lat, lon = settled[k].lon) }
     }
     var idx by remember(day) { mutableIntStateOf(0) }
@@ -136,7 +157,7 @@ fun DayReplayScreen(title: String, places: List<KnownPlace>, db: app.mettle.data
                 val dot = remember { app.mettle.ui.workout.dotIcon(MettleColors.Descent) }
                 pts.getOrNull(idx)?.let { p ->
                     com.google.maps.android.compose.Marker(state = com.google.maps.android.compose.rememberMarkerState(position = LatLng(p.lat, p.lon)).also { it.position = LatLng(p.lat, p.lon) },
-                        icon = dot, anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.5f), flat = true, zIndex = 5f, title = "Replay position")
+                        icon = dot, anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.5f), flat = true, zIndex = 5f)
                 }
             }
             if (points == null) Text("Loading…", modifier = Modifier.align(Alignment.Center), style = MaterialTheme.typography.titleMedium)
