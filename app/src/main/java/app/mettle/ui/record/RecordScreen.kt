@@ -66,7 +66,11 @@ fun RecordScreen(db: app.mettle.data.db.MettleDatabase, onClose: () -> Unit, onS
     }
     val askLocation = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) { granted ->
         if (selected == ActivityType.STAIRS) { app.mettle.workout.WorkoutService.start(context, selected, machine, placeId); onStarted() }
-        else if (granted[android.Manifest.permission.ACCESS_FINE_LOCATION] == true) { hasLocation = true; app.mettle.workout.WorkoutService.start(context, selected); onStarted() }
+        else {
+            // Start either way: without precise location the recording screen says exactly what to fix.
+            hasLocation = granted[android.Manifest.permission.ACCESS_FINE_LOCATION] == true
+            app.mettle.workout.WorkoutService.start(context, selected); onStarted()
+        }
     }
 
     Column(Modifier.fillMaxSize().background(MettleColors.Surface).statusBarsPadding()) {

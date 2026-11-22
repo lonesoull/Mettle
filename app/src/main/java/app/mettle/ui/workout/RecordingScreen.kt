@@ -86,7 +86,10 @@ fun RecordingScreen(onFinished: (sessionId: String) -> Unit) {
             if (stats) BigStats(live)
             else Box(Modifier.fillMaxSize()) {
                 RouteMap(live.route, follow = true, modifier = Modifier.fillMaxSize())
-                StatusChip(live, Modifier.statusBarsPadding().padding(12.dp))
+                Column(Modifier.statusBarsPadding().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    StatusChip(live)
+                    GpsHelp(live)
+                }
             }
         }
         if (!statsView) MapStats(live)
@@ -112,9 +115,12 @@ fun RecordingScreen(onFinished: (sessionId: String) -> Unit) {
 }
 
 private fun statusOf(live: LiveWorkout): Pair<String, Color> = when {
+    live.gpsProblem != null -> live.gpsProblem to MettleColors.WarnText
     live.paused -> "Paused" to MettleColors.Warn
+    live.lastFixAt == 0L -> "Searching for GPS" to MettleColors.Sub
+    System.currentTimeMillis() - live.lastFixAt > 15_000 -> "GPS signal lost" to MettleColors.WarnText
     live.autoPaused -> "Auto-paused" to MettleColors.Warn
-    live.gpsAccuracyM == null -> "Searching for GPS" to MettleColors.Sub
+    (live.gpsAccuracyM ?: 99f) > 25f -> "Weak GPS · ±${live.gpsAccuracyM?.toInt()} m" to MettleColors.Warn
     else -> "Recording" to MettleColors.Orange
 }
 
@@ -267,4 +273,26 @@ fun Pill(text: String, bg: Color, fg: Color, modifier: Modifier = Modifier, onCl
             .clickable(role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { Text(text, style = MaterialTheme.typography.labelLarge, color = fg) }
+}
+
+/** Explains what to do when GPS isn't arriving. */
+@Composable
+private fun GpsHelp(live: LiveWorkout) {
+    val context = LocalContext.current
+    val searchingLong = live.lastFixAt == 0L && live.elapsedS >= 20
+    val weak = live.lastFixAt != 0L && (live.gpsAccuracyM ?: 0f) > 25f
+    if (live.gpsProblem == null && !searchingLong && !weak) return
+    val text = when {
+        live.gpsProblem != null -> "Mettle can't use GPS until this is fixed."
+        searchingLong -> "No GPS yet. Step outside, away from tall buildings, and keep the phone still for a moment."
+        else -> "GPS is rough here (indoors or between buildings). Distance counts again once it's under 25 m."
+    }
+    Column(Modifier.shadow(4.dp, RoundedCornerShape(14.dp)).clip(RoundedCornerShape(14.dp)).background(MettleColors.Surface).padding(12.dp)) {
+        Text(text, style = MaterialTheme.typography.bodySmall, color = MettleColors.Ink2)
+        if (live.gpsProblem != null) TextButton(onClick = {
+            val i = if (live.gpsProblem.startsWith("Location is turned off")) android.content.Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+                else android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + context.packageName))
+            runCatching { context.startActivity(i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        }) { Text("Open settings", color = MettleColors.Orange) }
+    }
 }

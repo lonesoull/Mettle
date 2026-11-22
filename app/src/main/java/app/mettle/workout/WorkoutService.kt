@@ -59,6 +59,8 @@ data class LiveWorkout(
     val elevGainM: Double = 0.0,
     val route: List<Pair<Double, Double>> = emptyList(),
     val gpsAccuracyM: Float? = null,
+    val gpsProblem: String? = null,      // why GPS isn't arriving (permission, location off)
+    val lastFixAt: Long = 0L,
     // Stairs
     val machine: Boolean = false,
     val placeId: String? = null,
@@ -93,6 +95,9 @@ class WorkoutService : Service(), SensorEventListener {
     private var floorHeight = 3.0
     private var spokenKm = 0
     @Volatile private var segment = 0
+    @Volatile private var mslBusy = false
+    @Volatile private var fixes = 0L
+    @Volatile private var lastFixMs = 0L
     private val db get() = (application as MettleApplication).database
 
     private val locationCallback = object : LocationCallback() {
@@ -101,7 +106,13 @@ class WorkoutService : Service(), SensorEventListener {
             if (!live.recording) return
             for (l in result.locations) {
                 // Sea-level height (not GPS ellipsoid height); the correction is prepared once per area off the main thread.
-                if (!app.mettle.tracking.Msl.ready(l)) { val copy = android.location.Location(l); scope.launch(kotlinx.coroutines.Dispatchers.IO) { app.mettle.tracking.Msl.prepare(this@WorkoutService, copy) } }
+                if (!app.mettle.tracking.Msl.ready(l) && !mslBusy) {
+                    mslBusy = true
+                    val copy = android.location.Location(l)
+                    scope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { app.mettle.tracking.Msl.prepare(this@WorkoutService, copy) }; mslBusy = false }
+                }
+                if (fixes++ == 0L) app.mettle.tracking.Diag.log(this@WorkoutService, "Workout: first GPS fix after ${(System.currentTimeMillis() - live.startedAt) / 1000} s, ±${l.accuracy.toInt()} m")
+                lastFixMs = System.currentTimeMillis()
                 val s = Sample(l.time, l.latitude, l.longitude, if (l.hasAccuracy()) l.accuracy else null,
                     app.mettle.tracking.Msl.corrected(l), pressure, steps, if (l.hasSpeed()) l.speed else null, segment)
                 synchronized(samples) { if (!live.paused) samples += s }
@@ -112,7 +123,7 @@ class WorkoutService : Service(), SensorEventListener {
                         steps = steps, paused = live.paused, pressureHpa = pressure, heartRate = app.mettle.health.HeartRateBle.bpm.value,
                     ))
                 }
-                state.value = state.value.copy(gpsAccuracyM = s.accuracyM)
+                state.value = state.value.copy(gpsAccuracyM = s.accuracyM, gpsProblem = null, lastFixAt = System.currentTimeMillis())
             }
         }
     }
@@ -181,6 +192,15 @@ class WorkoutService : Service(), SensorEventListener {
     private suspend fun ticker() {
         var n = 0
         while (scope.isActive && state.value.recording) {
+            val ok = runCatching { tick(n++) }
+            if (ok.isFailure) app.mettle.tracking.Diag.log(this, "Workout update error: ${ok.exceptionOrNull()?.javaClass?.simpleName}")
+            delay(2000)
+        }
+    }
+
+    /** One live update (every 2 s). */
+    private fun tick(n: Int) {
+        run {
             state.value = state.value.copy(heartRate = app.mettle.health.HeartRateBle.bpm.value)
             if (state.value.type == ActivityType.STAIRS) {
                 val (st, al, lp) = synchronized(stepTimes) { Triple(ArrayList(stepTimes), ArrayList(altitude), ArrayList(laps)) }
@@ -194,9 +214,8 @@ class WorkoutService : Service(), SensorEventListener {
                     setNo = r.sets.size + (if (r.sets.lastOrNull()?.floorsDown ?: 1 > 0) 1 else 0).coerceAtLeast(1),
                     climbing = if (!active) null else lastBout!!.direction == app.mettle.stairs.Direction.UP || (lastBout.direction == app.mettle.stairs.Direction.FLAT && !state.value.hasBarometer),
                 )
-                if (n++ % 2 == 0) refreshNotification()
-                delay(2000)
-                continue
+                if (n % 2 == 0) refreshNotification()
+                return
             }
             val snapshot = synchronized(samples) { ArrayList(samples) }
             val r = WorkoutMath.analyse(snapshot)
@@ -228,16 +247,27 @@ class WorkoutService : Service(), SensorEventListener {
                     (pace?.let { " Average pace ${it / 60} minutes ${it % 60} seconds per kilometre." } ?: "")
                 speak(text)
             }
-            if (n++ % 2 == 0) refreshNotification()
-            delay(2000)
+            if (n % 2 == 0) refreshNotification()
         }
     }
 
     @SuppressLint("MissingPermission")
     private fun requestLocation() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
-        val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000L).setMinUpdateIntervalMillis(1000L).build()
-        LocationServices.getFusedLocationProviderClient(this).requestLocationUpdates(req, locationCallback, Looper.getMainLooper())
+        fixes = 0; lastFixMs = 0
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            state.value = state.value.copy(gpsProblem = "Precise location is off for Mettle")
+            app.mettle.tracking.Diag.log(this, "Workout: no precise-location permission")
+            return
+        }
+        val lm = getSystemService(android.location.LocationManager::class.java)
+        if (!lm.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER)) {
+            state.value = state.value.copy(gpsProblem = "Location is turned off on this phone")
+            app.mettle.tracking.Diag.log(this, "Workout: phone location is off")
+        }
+        val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000L).setMinUpdateIntervalMillis(1000L)
+            .setWaitForAccurateLocation(false).build()
+        runCatching { LocationServices.getFusedLocationProviderClient(this).requestLocationUpdates(req, locationCallback, Looper.getMainLooper()) }
+            .onFailure { state.value = state.value.copy(gpsProblem = "Couldn't start GPS"); app.mettle.tracking.Diag.log(this, "Workout: GPS request failed ${it.javaClass.simpleName}") }
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit

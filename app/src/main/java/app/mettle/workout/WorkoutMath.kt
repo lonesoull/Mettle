@@ -89,7 +89,7 @@ object WorkoutMath {
         val start = sorted.firstOrNull()?.tMs ?: 0L
         val end = sorted.lastOrNull()?.tMs ?: 0L
         // GPS warm-up: skip the first rough fixes until the receiver has a good lock.
-        val firstGood = sorted.indexOfFirst { it.lat != null && (it.accuracyM ?: 0f) <= 20f }
+        val firstGood = sorted.indexOfFirst { it.lat != null && (it.accuracyM ?: 0f) <= MAX_ACCURACY_M }
         val pts = if (firstGood < 0) emptyList() else
             sorted.drop(firstGood).filter { it.lat != null && it.lon != null && (it.accuracyM ?: 0f) <= MAX_ACCURACY_M }
         val useBaro = pts.count { it.pressureHpa != null } > pts.size / 2
