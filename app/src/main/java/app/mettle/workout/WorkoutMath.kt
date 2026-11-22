@@ -46,6 +46,8 @@ object WorkoutMath {
     const val MAX_ACCURACY_M = 25f
     const val MOVING_SPEED = 0.6          // m/s — below this you're standing still
     const val AUTO_PAUSE_AFTER_S = 5
+    const val GATE_MIN_M = 10.0
+    const val GATE_MAX_M = 25.0
 
     val EFFORTS = listOf("run_400m" to 400, "run_1k" to 1000, "run_1mi" to 1609, "run_5k" to 5000, "run_10k" to 10000, "run_half" to 21097)
 
@@ -113,9 +115,28 @@ object WorkoutMath {
         var total = 0.0
         var stillSince: Long? = null
         val smoother = Smoother(3.0)
+        // Steps (runs/walks/hikes): if the step counter is recorded but hasn't moved for 8 s, you're standing,
+        // whatever the GPS wobble says. Phones without a step sensor simply skip this check.
+        val hasSteps = sorted.count { it.steps != null } > sorted.size / 2
+        val stepTimes = ArrayList<Pair<Long, Int>>()
+        sorted.forEach { s -> s.steps?.let { stepTimes += s.tMs to it } }
+        fun stillBySteps(t: Long): Boolean {
+            if (!hasSteps) return false
+            var lo = 0; var hi = stepTimes.lastIndex; var at = -1
+            while (lo <= hi) { val m = (lo + hi) / 2; if (stepTimes[m].first <= t) { at = m; lo = m + 1 } else hi = m - 1 }
+            if (at < 0) return false
+            val now = stepTimes[at]
+            var k = at
+            while (k > 0 && stepTimes[k - 1].first >= t - 8_000) k--
+            return stepTimes[k].first <= t - 7_000 && stepTimes[k].second == now.second
+        }
         var prevLat = 0.0; var prevLon = 0.0; var prevT = 0L; var prevSeg = -1
+        // Movement gate (idea from OpenTracks): distance waits as "pending" and only counts once the
+        // smoothed position has really moved away from the gate point. If the pending distance grows
+        // well beyond how far you actually got, it was noise (standing still) and is thrown away.
+        var gateLat = 0.0; var gateLon = 0.0; var pending = 0.0; var gateSet = false
         for ((i, p) in pts.withIndex()) {
-            if (p.segment != prevSeg) smoother.reset()           // after a pause: start a fresh line, don't bridge the gap
+            if (p.segment != prevSeg) { smoother.reset(); gateSet = false; pending = 0.0 }   // after a pause: fresh line, no bridging
             smoother.add(p.lat!!, p.lon!!, (p.accuracyM ?: 5f).toDouble(), p.tMs)
             val la = smoother.lat; val lo = smoother.lon
             var isMoving = true
@@ -125,7 +146,9 @@ object WorkoutMath {
                 val implied = if (dt > 0) d / dt else 0.0
                 // Moving or stopped: trust the GPS chip's own speed when it reports one.
                 val speed = if (hasDoppler && p.speedMs != null) p.speedMs.toDouble() else implied
-                if (speed < MOVING_SPEED) {
+                // Steps say "standing" unless the GPS chip itself measures a clear running/riding speed.
+                val chipFast = p.speedMs != null && p.speedMs >= 2.0f
+                if (speed < MOVING_SPEED || (!chipFast && stillBySteps(p.tMs))) {
                     if (stillSince == null) stillSince = prevT
                     if ((p.tMs - stillSince!!) / 1000 >= AUTO_PAUSE_AFTER_S) isMoving = false
                 } else stillSince = null
@@ -136,11 +159,21 @@ object WorkoutMath {
                 val prevSpeed = pts[i - 1].speedMs
                 val step = if (hasDoppler && p.speedMs != null && prevSpeed != null && dt in 0.0..5.0)
                     ((p.speedMs + prevSpeed) / 2.0) * dt else d
-                if (isMoving && !jump) total += step
+                if (isMoving && !jump) pending += step
+                if (!gateSet) { gateLat = la; gateLon = lo; gateSet = true }
+                val gate = ((p.accuracyM ?: 10f).toDouble()).coerceIn(GATE_MIN_M, GATE_MAX_M)
+                val moved = haversineM(gateLat, gateLon, la, lo)
+                if (moved >= gate) { total += pending; pending = 0.0; gateLat = la; gateLon = lo }
+                else if (pending > 3 * gate) pending = 0.0      // lots of "distance" but no real progress: noise
             } else stillSince = null
+            if (!gateSet) { gateLat = la; gateLon = lo; gateSet = true }
             prevLat = la; prevLon = lo; prevT = p.tMs; prevSeg = p.segment
             t += ((p.tMs - start) / 1000).toInt(); lat += la; lon += lo
             dist += total; alt += smoothAlts[i]; moving += isMoving
+        }
+        // The last few metres before Finish: count them if they were real progress, not jitter.
+        if (pending > 0 && lat.isNotEmpty() && haversineM(gateLat, gateLon, lat.last(), lon.last()) >= pending * 0.5) {
+            total += pending; dist[dist.lastIndex] = total
         }
 
         var movingS = 0

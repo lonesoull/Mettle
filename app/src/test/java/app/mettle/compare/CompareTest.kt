@@ -32,10 +32,10 @@ class CompareTest {
     }
 
     /** path(t) gives true metres (x east, y north) at second t; returns (samples, true distance). */
-    var slow = true; var speedMissing = 0.0
+    var slow = true; var speedMissing = 0.0; var withSteps = false
     private fun simulate(seconds: Int, noise: Double, seed: Long, multipath: Double = 0.0, dopplerNoise: Double = dop,
                          path: (Double) -> Pair<Double, Double>): Pair<List<Sample>, Double> {
-        val r = Random(seed); var ex = 0.0; var ey = 0.0; var truth = 0.0
+        val r = Random(seed); var ex = 0.0; var ey = 0.0; var truth = 0.0; var stepAcc = 0.0
         var prev = path(0.0)
         val out = ArrayList<Sample>()
         for (t in 0..seconds) {
@@ -51,7 +51,9 @@ class CompareTest {
             val (nx, ny) = path(t + 0.5); val sp = sqrt((nx - x) * (nx - x) + (ny - y) * (ny - y)) * 2
             // Chip speed: noisy, biased upward when nearly still (it can't go below 0), sometimes missing.
             val speed = if (r.nextDouble() < speedMissing) null else abs(sp + r.nextGaussian() * dopplerNoise).toFloat()
-            out += Sample(t * 1000L, lat0 + (y + ey + jy) / mLat, lon0 + (x + ex + jx) / mLon, acc, null, null, null, speed, 0)
+            if (sp > 0.3) stepAcc += sp * 1.4          // ~1.4 steps per metre on foot
+            out += Sample(t * 1000L, lat0 + (y + ey + jy) / mLat, lon0 + (x + ex + jx) / mLon, acc, null, null,
+                if (withSteps) stepAcc.toInt() else null, speed, 0)
         }
         return out to truth
     }
@@ -74,6 +76,10 @@ class CompareTest {
         println("RESULT|--- harsh: fast GPS jitter, speed ±0.8 m/s, 30% speed missing ---||")
         slow = false; speedMissing = 0.3
         runAll(doppler = 0.8)
+        println("RESULT|--- realistic + step counter ---||")
+        slow = true; speedMissing = 0.0; withSteps = true; runAll()
+        println("RESULT|--- harsh + step counter ---||")
+        slow = false; speedMissing = 0.3; runAll(doppler = 0.8)
     }
 
     private var dop = 0.4

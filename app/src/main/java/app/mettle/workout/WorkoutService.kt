@@ -167,7 +167,10 @@ class WorkoutService : Service(), SensorEventListener {
             (sensors.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR) ?: sensors.getDefaultSensor(Sensor.TYPE_STEP_COUNTER))
                 ?.let { sensors.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST) }
         } else {
-            sensors.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)?.let { sensors.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
+            // Per-step sensor (reports within ~1 s) so stops are noticed quickly; step counter as fallback.
+            (sensors.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR) ?: sensors.getDefaultSensor(Sensor.TYPE_STEP_COUNTER))
+                ?.let { sensors.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST) }
+            steps = 0
             requestLocation()
         }
         sensors.getDefaultSensor(Sensor.TYPE_PRESSURE)?.let { sensors.registerListener(this, it, 500_000) }
@@ -283,7 +286,9 @@ class WorkoutService : Service(), SensorEventListener {
                     stairRow(now)
                 }
             }
-            Sensor.TYPE_STEP_DETECTOR -> if (live.type == ActivityType.STAIRS && live.recording && !live.paused) {
+            Sensor.TYPE_STEP_DETECTOR -> if (live.type != ActivityType.STAIRS && live.recording && !live.paused) {
+                steps = (steps ?: 0) + 1
+            } else if (live.type == ActivityType.STAIRS && live.recording && !live.paused) {
                 synchronized(stepTimes) { stepTimes += now }
                 steps = stepTimes.size
                 stairRow(now)
