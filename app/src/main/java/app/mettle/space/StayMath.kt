@@ -13,13 +13,69 @@ data class KnownPlace(val label: String, val lat: Double, val lon: Double)
 object StayMath {
     const val STAY_RADIUS_M = 75.0
     const val MIN_STAY_MS = 5 * 60_000L
+    const val MAX_DAY_ACCURACY_M = 75f
+
+    /**
+     * Cleans a day of location points before drawing or finding places. Indoors and while still,
+     * the phone's Wi-Fi/cell positions can be hundreds of metres off and jump back and forth.
+     * Returns the indices of points worth keeping:
+     *  - drops vague fixes (accuracy worse than [MAX_DAY_ACCURACY_M]),
+     *  - drops jumps faster than any vehicle,
+     *  - drops "spikes": a point far from both neighbours while those neighbours agree with each other.
+     */
+    fun clean(points: List<TrackPt>): List<Int> {
+        var idx = points.indices.filter { (points[it].accuracyM ?: 0f) <= MAX_DAY_ACCURACY_M }.sortedBy { points[it].tMs }
+        fun d(a: Int, b: Int) = WorkoutMath.haversineM(points[a].lat, points[a].lon, points[b].lat, points[b].lon)
+        // Impossible speed vs the last kept point (>200 km/h).
+        val fast = ArrayList<Int>()
+        for (i in idx) {
+            val last = fast.lastOrNull()
+            if (last == null) { fast += i; continue }
+            val dt = (points[i].tMs - points[last].tMs) / 1000.0
+            if (dt > 0 && d(last, i) / dt > 55 && d(last, i) > 150) continue
+            fast += i
+        }
+        idx = fast
+        repeat(3) {
+            if (idx.size < 3) return idx
+            val keep = ArrayList<Int>(idx.size); keep += idx.first()
+            for (k in 1 until idx.lastIndex) {
+                val a = keep.last(); val b = idx[k]; val c = idx[k + 1]
+                val tol = maxOf(60.0, (points[b].accuracyM ?: 30f).toDouble())
+                val spike = d(a, b) > tol && d(b, c) > tol && d(a, c) < 0.5 * minOf(d(a, b), d(b, c))
+                if (!spike) keep += b
+            }
+            keep += idx.last()
+            if (keep.size == idx.size) return keep
+            idx = keep
+        }
+        return idx
+    }
+
+    /**
+     * For drawing: while you stay in one spot, wobbling fixes are replaced by that spot's centre,
+     * so the map shows a dot instead of a scribble. Movement is kept as recorded.
+     */
+    fun settle(points: List<TrackPt>): List<TrackPt> {
+        val out = ArrayList<TrackPt>(points.size)
+        var i = 0
+        while (i < points.size) {
+            var sumLat = points[i].lat; var sumLon = points[i].lon; var n = 1; var j = i + 1
+            while (j < points.size && WorkoutMath.haversineM(sumLat / n, sumLon / n, points[j].lat, points[j].lon) <= STAY_RADIUS_M) {
+                sumLat += points[j].lat; sumLon += points[j].lon; n++; j++
+            }
+            if (n >= 3) for (k in i until j) out += points[k].copy(lat = sumLat / n, lon = sumLon / n) else for (k in i until j) out += points[k]
+            i = j
+        }
+        return out
+    }
 
     /**
      * Stays: stretches of time spent within [STAY_RADIUS_M] of one spot for at
      * least [MIN_STAY_MS]. Points with poor accuracy (> 150 m) are ignored.
      */
     fun stays(points: List<TrackPt>): List<Stay> {
-        val pts = points.filter { (it.accuracyM ?: 0f) <= 150f }.sortedBy { it.tMs }
+        val pts = clean(points).map { points[it] }
         val out = ArrayList<Stay>()
         var i = 0
         while (i < pts.size) {
@@ -45,8 +101,11 @@ object StayMath {
         val merged = ArrayList<Stay>()
         for (s in out) {
             val last = merged.lastOrNull()
-            if (last != null && WorkoutMath.haversineM(last.lat, last.lon, s.lat, s.lon) <= STAY_RADIUS_M && s.startMs - last.endMs < 20 * 60_000L) {
-                merged[merged.lastIndex] = last.copy(endMs = s.endMs)
+            val near = maxOf(120.0, (last?.accuracyM ?: 0f).toDouble() + s.accuracyM)
+            if (last != null && WorkoutMath.haversineM(last.lat, last.lon, s.lat, s.lon) <= near && s.startMs - last.endMs < 45 * 60_000L) {
+                val wa = (last.endMs - last.startMs).toDouble(); val wb = (s.endMs - s.startMs).toDouble()
+                merged[merged.lastIndex] = last.copy(endMs = s.endMs,
+                    lat = (last.lat * wa + s.lat * wb) / (wa + wb), lon = (last.lon * wa + s.lon * wb) / (wa + wb))
             } else merged += s
         }
         return merged
@@ -76,5 +135,5 @@ object StayMath {
     }
 
     fun label(stay: Stay, places: List<KnownPlace>): String? =
-        places.firstOrNull { WorkoutMath.haversineM(it.lat, it.lon, stay.lat, stay.lon) <= 120 }?.label
+        places.firstOrNull { WorkoutMath.haversineM(it.lat, it.lon, stay.lat, stay.lon) <= maxOf(150.0, stay.accuracyM.toDouble()) }?.label
 }

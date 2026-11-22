@@ -75,7 +75,14 @@ fun DayReplayScreen(title: String, places: List<KnownPlace>, db: app.mettle.data
     var day by rememberSaveable { mutableStateOf(LocalDate.now(zone).toString()) }
     val date = LocalDate.parse(day)
     val points by produceState<List<ReplayPoint>?>(null, day) { value = null; value = runCatching { load(date) }.getOrDefault(emptyList()) }
-    val pts = points.orEmpty()
+    // Clean out vague and jumping Wi-Fi/cell fixes, then pin wobble while you stay put.
+    val pts = remember(points) {
+        val raw = points.orEmpty().sortedBy { it.tMs }
+        val tp = raw.map { TrackPt(it.tMs, it.lat, it.lon, it.accuracyM, it.altitudeM) }
+        val keep = StayMath.clean(tp)
+        val settled = StayMath.settle(keep.map { tp[it] })
+        keep.mapIndexed { k, i -> raw[i].copy(lat = settled[k].lat, lon = settled[k].lon) }
+    }
     var idx by remember(day) { mutableIntStateOf(0) }
     var playing by remember(day) { mutableStateOf(false) }
     LaunchedEffect(playing, pts.size) {
