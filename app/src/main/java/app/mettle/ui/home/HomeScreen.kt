@@ -109,12 +109,11 @@ val SOS_RED = androidx.compose.ui.graphics.Color(0xFFDC2626)
 
 @Composable
 private fun Greeting(name: String, onSafety: () -> Unit) {
-    val now = remember { java.time.LocalDateTime.now() }
-    val part = when (now.hour) { in 5..11 -> "Good morning"; in 12..16 -> "Good afternoon"; else -> "Good evening" }
-    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+    val now = remember { java.time.LocalDate.now() }
+    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 16.dp), verticalAlignment = Alignment.Bottom) {
         Column(Modifier.weight(1f)) {
-            Text(now.format(DateTimeFormatter.ofPattern("EEEE, d MMMM")), style = Ui.Caption, color = MettleColors.Sub)
-            Text(if (name.isBlank()) part else "$part, ${name.trim().substringBefore(' ')}", style = Ui.PageTitle, color = MettleColors.Ink,
+            Text(now.format(DateTimeFormatter.ofPattern("EEEE, d MMMM")).uppercase(), style = Ui.Caption.copy(letterSpacing = 0.6.sp), color = MettleColors.Sub)
+            Text("Summary", style = Ui.PageTitle.copy(fontSize = 32.sp, lineHeight = 38.sp), color = MettleColors.Ink,
                 modifier = Modifier.semantics { heading() })
         }
         IconButton(onClick = onSafety, modifier = Modifier.size(48.dp)) {
@@ -171,14 +170,14 @@ private fun ActivityCard(a: ActivityEntity, zone: ZoneId, name: String, onOpen: 
     ProCard(onClick = onOpen, onClickLabel = "Open ${a.title}", padding = false) {
         Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Avatar(name.ifBlank { "You" }, size = 36, you = true)
-                Column(Modifier.weight(1f).padding(start = 10.dp)) {
-                    Text(name.ifBlank { "You" }.trim().substringBefore(' '), style = Ui.Strong, color = MettleColors.Ink)
+                Box(Modifier.size(40.dp).clip(CircleShape).background(MettleColors.OrangeWash), contentAlignment = Alignment.Center) {
+                    Icon(typeIcon(a.type), contentDescription = a.type.name.lowercase(), tint = MettleColors.Orange, modifier = Modifier.size(22.dp))
+                }
+                Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                    Text(a.title, style = Ui.CardTitle, color = MettleColors.Ink)
                     Text(whenText, style = Ui.Caption, color = MettleColors.Sub)
                 }
-                Icon(typeIcon(a.type), contentDescription = a.type.name.lowercase(), tint = MettleColors.Sub, modifier = Modifier.size(22.dp))
             }
-            Text(a.title, style = Ui.CardTitle.copy(fontSize = 19.sp, lineHeight = 24.sp), color = MettleColors.Ink)
             Row(Modifier.fillMaxWidth()) {
                 if (a.type == ActivityType.STAIRS) {
                     Metric("Floors up", a.floorsUp.toString(), Modifier.weight(1f), small = true)
@@ -191,7 +190,11 @@ private fun ActivityCard(a: ActivityEntity, zone: ZoneId, name: String, onOpen: 
                 }
             }
         }
-        if (route.size >= 5) RouteSketch(route, height = 160, rounded = false) else Spacer(Modifier.height(2.dp))
+        if (route.size >= 5) {
+            if (app.mettle.ui.workout.MapsConfig.enabled)
+                app.mettle.ui.workout.RouteMap(route, follow = false, interactive = false, lite = true, modifier = Modifier.fillMaxWidth().height(170.dp))
+            else RouteSketch(route, height = 170, rounded = false)
+        } else Spacer(Modifier.height(2.dp))
     }
 }
 

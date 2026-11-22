@@ -30,10 +30,6 @@ fun RouteSketch(points: List<Pair<Double, Double>>, modifier: Modifier = Modifie
     val shape = if (rounded) RoundedCornerShape(12.dp) else RoundedCornerShape(0.dp)
     Canvas(modifier.fillMaxWidth().height(height.dp).clip(shape).background(SketchGround)
         .semantics { contentDescription = "Route shape" }) {
-        // Faint street-like grid so the sketch reads as a map, not an outline on grey.
-        val step = 28.dp.toPx()
-        var gx = step / 2; while (gx < size.width) { drawLine(SketchGrid, androidx.compose.ui.geometry.Offset(gx, 0f), androidx.compose.ui.geometry.Offset(gx, size.height), 1.5f); gx += step }
-        var gy = step / 2; while (gy < size.height) { drawLine(SketchGrid, androidx.compose.ui.geometry.Offset(0f, gy), androidx.compose.ui.geometry.Offset(size.width, gy), 1.5f); gy += step }
         val w = (maxLon - minLon) * lonScale; val h = maxLat - minLat
         val pad = 24.dp.toPx()
         val s = minOf((size.width - 2 * pad) / w.coerceAtLeast(1e-6), (size.height - 2 * pad) / h.coerceAtLeast(1e-6))
