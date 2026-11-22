@@ -78,51 +78,59 @@ fun TodayCard(db: MettleDatabase, trackingOn: Boolean, onSetup: () -> Unit, onDa
     val segments = remember(minutes) { DayMath.segments(minutes) }
     val ring by animateFloatAsState((s.steps.toFloat() / goal).coerceIn(0f, 1f), tween(900), label = "steps")
 
-    app.mettle.ui.components.Section(title = "Today", action = "Your day", onAction = onDay) {
-        if (!trackingOn) {
-            app.mettle.ui.components.EmptyState("All-day tracking is off",
-                "Turn it on to count steps, floors and active minutes, and to build your day's timeline.", "Set up all-day tracking", onSetup)
-            return@Section
+    if (!trackingOn) {
+        app.mettle.ui.components.ProCard {
+            Text("Track your whole day", style = app.mettle.ui.components.Ui.CardTitle, color = MettleColors.Ink)
+            Text("Steps, active time, floors and places, recorded automatically.", style = app.mettle.ui.components.Ui.Body, color = MettleColors.Sub)
+            app.mettle.ui.components.PrimaryButton("Turn on", onClick = onSetup)
         }
+        return
+    }
+    app.mettle.ui.components.ProCard(onClick = onDay, onClickLabel = "Open your day") {
+        app.mettle.ui.components.CardHeader("Today", opens = true)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-            Box(Modifier.size(116.dp).semantics(mergeDescendants = true) { contentDescription = "${s.steps} of $goal steps" }, contentAlignment = Alignment.Center) {
+            Box(Modifier.size(108.dp).semantics(mergeDescendants = true) { contentDescription = "${s.steps} of $goal steps" }, contentAlignment = Alignment.Center) {
                 Canvas(Modifier.fillMaxSize()) {
-                    val w = 10.dp.toPx(); val r = size.minDimension / 2 - w / 2
+                    val w = 9.dp.toPx(); val r = size.minDimension / 2 - w / 2
                     val tl = Offset(center.x - r, center.y - r)
-                    drawArc(MettleColors.Band, -90f, 360f, false, tl, Size(r * 2, r * 2), style = Stroke(w))
+                    drawArc(app.mettle.ui.components.Ui.Page, -90f, 360f, false, tl, Size(r * 2, r * 2), style = Stroke(w))
                     drawArc(MettleColors.Orange, -90f, 360f * ring, false, tl, Size(r * 2, r * 2), style = Stroke(w, cap = StrokeCap.Round))
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(String.format(Locale.US, "%,d", s.steps), style = MettleType.StatMedium)
-                    Text(String.format(Locale.US, "of %,d steps", goal), style = MettleType.Label, color = MettleColors.Sub)
+                    Text(String.format(Locale.US, "%,d", s.steps), style = app.mettle.ui.components.Ui.Value)
+                    Text("steps", style = app.mettle.ui.components.Ui.Caption, color = MettleColors.Sub)
                 }
             }
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Mini("Distance", Fmt.km2(s.distanceM.toLong()) + " km")
-                Mini("Active", "${s.activeMin} min")
-                Mini(if (s.floorsUp + s.floorsDown > 0) "Floors" else "Calories",
-                    if (s.floorsUp + s.floorsDown > 0) "▲ ${s.floorsUp}  ▼ ${s.floorsDown}" else "${s.activeCalories} kcal")
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                app.mettle.ui.components.IconMetric(app.mettle.ui.theme.MettleIcons.Route, "Distance", Fmt.km2(s.distanceM.toLong()) + " km")
+                app.mettle.ui.components.IconMetric(app.mettle.ui.theme.MettleIcons.Clock, "Active", "${s.activeMin} min")
+                if (s.floorsUp + s.floorsDown > 0) app.mettle.ui.components.IconMetric(app.mettle.ui.theme.MettleIcons.Stairs, "Floors", "${s.floorsUp} up · ${s.floorsDown} down")
+                else app.mettle.ui.components.IconMetric(app.mettle.ui.theme.MettleIcons.Flame, "Calories", "${s.activeCalories} kcal")
             }
         }
+        Text(String.format(Locale.US, "%d%% of your %,d-step goal", (s.steps * 100L / goal.coerceAtLeast(1)).toInt(), goal),
+            style = app.mettle.ui.components.Ui.Caption, color = MettleColors.Sub)
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Canvas(Modifier.fillMaxWidth().height(14.dp).clip(RoundedCornerShape(7.dp)).background(MettleColors.Band)
+            Canvas(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)).background(app.mettle.ui.components.Ui.Page)
                 .semantics { contentDescription = "Timeline of your day" }) {
                 val perMin = size.width / 1440f
                 segments.forEach { seg ->
+                    if (seg.state == DayState.STILL || seg.state == DayState.UNKNOWN) return@forEach
                     drawRect(stateColor(seg.state), Offset(seg.startMinute * perMin, 0f),
-                        Size(((seg.endMinute - seg.startMinute) * perMin).coerceAtLeast(1.5f), size.height))
+                        Size(((seg.endMinute - seg.startMinute) * perMin).coerceAtLeast(2f), size.height))
                 }
                 val now = LocalTime.now(zone).let { it.hour * 60 + it.minute } * perMin
-                drawLine(MettleColors.Ink, Offset(now, 0f), Offset(now, size.height), strokeWidth = 3f)
+                drawCircle(MettleColors.Ink, 4.dp.toPx(), Offset(now, size.height / 2))
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                listOf("12 am", "6 am", "12 pm", "6 pm", "12 am").forEach { Text(it, style = MettleType.Label, color = MettleColors.Muted) }
+                listOf("00:00", "06:00", "12:00", "18:00", "24:00").forEach { Text(it, style = app.mettle.ui.components.Ui.Caption, color = MettleColors.Muted) }
             }
+            val present = remember(segments) { segments.map { it.state }.toSet() }
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                listOf(DayState.SITTING, DayState.WALKING, DayState.RUNNING, DayState.VEHICLE).forEach { st ->
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Box(Modifier.size(10.dp).clip(CircleShape).background(stateColor(st)))
-                        Text(stateLabel(st), style = MettleType.Label, color = MettleColors.Ink2)
+                listOf(DayState.SITTING, DayState.WALKING, DayState.RUNNING, DayState.VEHICLE).filter { it in present }.forEach { st ->
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Box(Modifier.size(8.dp).clip(CircleShape).background(stateColor(st)))
+                        Text(stateLabel(st), style = app.mettle.ui.components.Ui.Caption, color = MettleColors.Ink2)
                     }
                 }
             }

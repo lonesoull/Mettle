@@ -99,7 +99,7 @@ fun MettleApp(db: MettleDatabase, profile: Profile, onSignOut: () -> Unit, onPro
                     onHealth = { nav.navigate("health") },
                     onOpen = { id -> nav.navigate("activity/$id") },
                     onResumeSave = { nav.navigate("save") },
-                    onLiveWorkout = { nav.navigate("recording") })
+                    onLiveWorkout = { nav.navigate("recording") }, name = profile.displayName)
             }
             composable("day") { DayReplayScreen("Your day", Places.known(ctx), db = db, load = { d -> localDay(db, d) }, onBack = null) }
             composable("progress") { ProgressScreen(db) }

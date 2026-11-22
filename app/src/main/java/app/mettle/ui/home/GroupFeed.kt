@@ -1,5 +1,7 @@
 package app.mettle.ui.home
 
+import androidx.compose.foundation.layout.Column
+
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -68,18 +70,31 @@ fun GroupFeedCard(item: FeedItem) {
     val pts = remember(item.route) {
         runCatching { Json.parseToJsonElement(item.route!!).jsonObject["coordinates"]!!.jsonArray.map { c -> c.jsonArray.let { it[1].jsonPrimitive.double to it[0].jsonPrimitive.double } } }.getOrDefault(emptyList())
     }
-    Section {
-        Text("${item.name} · " + Instant.parse(item.startedAt).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("EEE h:mm a")),
-            style = MettleType.Label, color = MettleColors.Sub)
-        Text(item.title, style = MaterialTheme.typography.headlineMedium)
-        Row(Modifier.fillMaxWidth()) {
-            if (item.type == "stairs") Stat("Floors up", "${item.floorsUp}", Modifier.weight(1f))
-            else { Stat("Distance", Fmt.km2(item.distanceM.toLong()), Modifier.weight(1f), unit = "km"); Stat("Pace", Fmt.pace(item.pace), Modifier.weight(1f), unit = "/km") }
-            Stat("Time", Fmt.duration(item.movingS.toLong()), Modifier.weight(1f))
+    val whenText = remember(item.startedAt) {
+        Instant.parse(item.startedAt).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("EEE d MMM 'at' h:mm a"))
+    }
+    app.mettle.ui.components.ProCard(padding = false) {
+        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                app.mettle.ui.components.Avatar(item.name, size = 36)
+                Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                    Text(item.name, style = app.mettle.ui.components.Ui.Strong, color = MettleColors.Ink)
+                    Text(whenText, style = app.mettle.ui.components.Ui.Caption, color = MettleColors.Sub)
+                }
+            }
+            Text(item.title, style = app.mettle.ui.components.Ui.CardTitle, color = MettleColors.Ink)
+            Row(Modifier.fillMaxWidth()) {
+                if (item.type == "stairs") app.mettle.ui.components.Metric("Floors up", "${item.floorsUp}", Modifier.weight(1f), small = true)
+                else {
+                    app.mettle.ui.components.Metric("Distance", Fmt.km2(item.distanceM.toLong()), Modifier.weight(1f), unit = "km", small = true)
+                    app.mettle.ui.components.Metric("Pace", Fmt.pace(item.pace), Modifier.weight(1f), unit = "/km", small = true)
+                }
+                app.mettle.ui.components.Metric("Time", Fmt.duration(item.movingS.toLong()), Modifier.weight(1f), small = true)
+            }
         }
-        app.mettle.ui.components.RouteSketch(pts)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            androidx.compose.material3.TextButton(onClick = {
+        app.mettle.ui.components.RouteSketch(pts, height = 160, rounded = false)
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.material3.IconButton(onClick = {
                 val was = mine; mine = !was; count += if (was) -1 else 1
                 scope.launch {
                     runCatching {
@@ -89,11 +104,11 @@ fun GroupFeedCard(item: FeedItem) {
                     }.onFailure { mine = was; count += if (was) 1 else -1 }
                 }
             }) {
-                androidx.compose.material3.Icon(app.mettle.ui.theme.MettleIcons.Heart, contentDescription = null,
-                    tint = if (mine) MettleColors.Orange else MettleColors.Ink2, modifier = Modifier.padding(end = 6.dp))
-                Text(if (mine) "Kudos given" else "Give kudos", style = MaterialTheme.typography.labelLarge, color = if (mine) MettleColors.Orange else MettleColors.Ink2)
+                androidx.compose.material3.Icon(app.mettle.ui.theme.MettleIcons.Heart, contentDescription = if (mine) "Remove kudos" else "Give kudos",
+                    tint = if (mine) MettleColors.Orange else MettleColors.Ink2)
             }
-            if (count > 0) Text("$count kudos", style = MettleType.Label, color = MettleColors.Sub)
+            Text(when (count) { 0L -> "Be the first to give kudos"; 1L -> "1 kudos"; else -> "$count kudos" },
+                style = app.mettle.ui.components.Ui.Caption, color = MettleColors.Sub)
         }
     }
 }

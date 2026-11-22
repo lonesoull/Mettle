@@ -50,6 +50,7 @@ class ScreensShot {
 
     @Before fun seed() {
         MapsConfig.enabled = false
+        app.mettle.workout.WorkoutService.state.value = app.mettle.workout.LiveWorkout()
         val app = ApplicationProvider.getApplicationContext<android.app.Application>()
         shadowOf(app).grantPermissions(Manifest.permission.ACTIVITY_RECOGNITION, Manifest.permission.POST_NOTIFICATIONS, Manifest.permission.ACCESS_FINE_LOCATION)
         app.getSharedPreferences("tracking", 0).edit().putBoolean("enabled", true).apply()
@@ -114,7 +115,8 @@ class ScreensShot {
         compose.onRoot().captureRoboImage("build/shots/$name.png")
     }
 
-    @Test fun home() = shot("1-home") { app.mettle.ui.home.HomeScreen(db, {}, {}, {}, {}, {}, {}, {}, {}) }
+    @Test fun home() = shot("1-home") { app.mettle.ui.home.HomeScreen(db, {}, {}, {}, {}, {}, {}, {}, {}, name = "Avinash Kumar") }
+    @Config(qualifiers = "w411dp-h891dp-xxhdpi") @Test fun homePhone() = shot("1-home-phone") { app.mettle.ui.home.HomeScreen(db, {}, {}, {}, {}, {}, {}, {}, {}, name = "Avinash Kumar") }
     @Test fun day() = shot("2-day") { app.mettle.ui.space.DayReplayScreen("Your day", emptyList(), db, load = { d -> app.mettle.ui.localDay(db, d) }, onBack = null) }
     @Test fun progress() = shot("3-progress") { app.mettle.ui.progress.ProgressScreen(db) }
     @Test fun you() = shot("4-you") { app.mettle.ui.you.YouScreen(profile, {}, {}, {}, {}, {}, {}, {}, {}) }

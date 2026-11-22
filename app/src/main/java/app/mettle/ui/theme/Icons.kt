@@ -52,5 +52,11 @@ object MettleIcons {
     val Stop = icon("stop", "M7 7h10v10H7z")
     val Share = icon("share", "M12 3v12M7 8l5-5 5 5M5 14v6h14v-6")
     val More = icon("more", "M12 5.5a1.2 1.2 0 1 0 0 .01M12 12a1.2 1.2 0 1 0 0 .01M12 18.5a1.2 1.2 0 1 0 0 .01", stroke = 3f)
+    val Clock = icon("clock", "M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18M12 7v5l3 2")
+    val Route = icon("route", "M4 17.5L17.5 4l2.5 2.5L6.5 20zM8 13.5l1.8 1.8M11 10.5l1.8 1.8M14 7.5l1.8 1.8")
+    val Flame = icon("flame", "M12 21c-4 0-7-2.7-7-6.5 0-3.3 2.4-5.4 4-8 .6 2 1.6 3 3 3.5C12 7 13 5 15 3c1 3 4 5.5 4 10.5 0 4.3-3 7.5-7 7.5z")
+    val Bell = icon("bell", "M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4")
+    val Up = icon("up", "M12 19V5M6 11l6-6 6 6", stroke = 2.2f)
+    val Down = icon("down", "M12 5v14M6 13l6 6 6-6", stroke = 2.2f)
     val Pause = icon("pause", "M7 4h4v16H7zM13 4h4v16h-4z", filled = true)
 }

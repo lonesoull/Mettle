@@ -1,6 +1,18 @@
 package app.mettle.ui.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.sp
+import app.mettle.ui.components.Avatar
+import app.mettle.ui.components.Metric
+import app.mettle.ui.components.PageSection
+import app.mettle.ui.components.PrimaryButton
+import app.mettle.ui.components.ProCard
+import app.mettle.ui.components.Ui
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -56,7 +68,7 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun HomeScreen(
     db: MettleDatabase, onRecord: () -> Unit, onSetup: () -> Unit, onDay: () -> Unit, onSafety: () -> Unit, onHealth: () -> Unit,
-    onOpen: (String) -> Unit, onResumeSave: () -> Unit, onLiveWorkout: () -> Unit,
+    onOpen: (String) -> Unit, onResumeSave: () -> Unit, onLiveWorkout: () -> Unit, name: String = "",
 ) {
     val ctx = LocalContext.current
     val zone = remember { ZoneId.systemDefault() }
@@ -71,68 +83,115 @@ fun HomeScreen(
     val recent by db.activities().recent().collectAsState(emptyList())
     val group by produceState(emptyList<FeedItem>()) { value = loadGroupFeed() }
 
-    Column(Modifier.fillMaxSize().background(MettleColors.Band)) {
-        TopBar("METTLE", wordmark = true) {
-            IconButton(onClick = onSafety, modifier = Modifier.heightIn(min = 48.dp)) {
-                Icon(MettleIcons.Shield, contentDescription = "Safety and SOS", tint = SOS_RED)
+    LazyColumn(Modifier.fillMaxSize().background(Ui.Page).statusBarsPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { Greeting(name, onSafety) }
+        if (live.recording) item { LiveCard(live, onLiveWorkout) }
+        else if (unsaved) item { UnsavedCard(onResumeSave) }
+        item { TodayCard(db, trackingOn, onSetup, onDay) }
+        item { ReadinessCard(onHealth) }
+        item { PageSection("Your activities") }
+        if (recent.isEmpty()) item {
+            ProCard {
+                Text("No workouts yet", style = Ui.CardTitle, color = MettleColors.Ink)
+                Text("Your runs, walks, hikes and stair sessions appear here.", style = Ui.Body, color = MettleColors.Sub)
+                PrimaryButton("Record a workout", onClick = onRecord)
             }
+        } else items(recent, key = { it.id }) { ActivityCard(it, zone, name) { onOpen(it.id) } }
+        if (group.isNotEmpty()) {
+            item { PageSection("Your group") }
+            items(group, key = { "g" + it.id }) { GroupFeedCard(it) }
         }
-        LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(Space.s)) {
-            if (live.recording) item { Banner("Workout in progress · tap to return", onLiveWorkout) }
-            else if (unsaved) item { Banner("You have an unsaved workout · tap to save it", onResumeSave) }
-            item { TodayCard(db, trackingOn, onSetup, onDay) }
-            item { ReadinessCard(onHealth) }
-            item { SectionHeader("Your activities") }
-            if (recent.isEmpty()) item {
-                Section { EmptyState("No workouts yet", "Record a run, walk, hike or stair session. It will show up here with its map, splits and records.", "Record a workout", onRecord) }
-            } else items(recent, key = { it.id }) { ActivityCard(it, zone) { onOpen(it.id) } }
-            if (group.isNotEmpty()) {
-                item { SectionHeader("Your group") }
-                items(group, key = { "g" + it.id }) { GroupFeedCard(it) }
-            }
-            item { Spacer(Modifier.height(Space.l)) }
-        }
+        item { Spacer(Modifier.height(Space.xl)) }
     }
 }
 
 val SOS_RED = androidx.compose.ui.graphics.Color(0xFFDC2626)
 
 @Composable
-private fun SectionHeader(text: String) {
-    Text(text, style = MaterialTheme.typography.titleLarge, color = MettleColors.Ink,
-        modifier = Modifier.padding(start = Space.l, end = Space.l, top = Space.m).semantics { heading() })
+private fun Greeting(name: String, onSafety: () -> Unit) {
+    val now = remember { java.time.LocalDateTime.now() }
+    val part = when (now.hour) { in 5..11 -> "Good morning"; in 12..16 -> "Good afternoon"; else -> "Good evening" }
+    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(now.format(DateTimeFormatter.ofPattern("EEEE, d MMMM")), style = Ui.Caption, color = MettleColors.Sub)
+            Text(if (name.isBlank()) part else "$part, ${name.trim().substringBefore(' ')}", style = Ui.PageTitle, color = MettleColors.Ink,
+                modifier = Modifier.semantics { heading() })
+        }
+        IconButton(onClick = onSafety, modifier = Modifier.size(48.dp)) {
+            Icon(MettleIcons.Shield, contentDescription = "Safety and SOS", tint = MettleColors.Ink)
+        }
+    }
 }
 
+/** While a workout records: a dark card with the live numbers, tap to return. */
 @Composable
-private fun Banner(text: String, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).background(MettleColors.Orange).clickable(role = Role.Button, onClick = onClick)
-        .padding(horizontal = Space.l, vertical = Space.m), verticalAlignment = Alignment.CenterVertically) {
-        Text(text, style = MaterialTheme.typography.titleSmall, color = MettleColors.Surface, modifier = Modifier.weight(1f))
+private fun LiveCard(live: app.mettle.workout.LiveWorkout, onClick: () -> Unit) {
+    Row(Modifier.padding(horizontal = Ui.Gutter).fillMaxWidth().clip(Ui.CardShape).background(MettleColors.Ink)
+        .clickable(role = Role.Button, onClickLabel = "Return to workout", onClick = onClick).padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(10.dp).clip(CircleShape).background(if (live.paused) MettleColors.Warn else MettleColors.Orange))
+        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+            Text(if (live.paused) "Workout paused" else "Recording " + live.type.name.lowercase(), style = Ui.Strong, color = MettleColors.Surface)
+            Text(Fmt.duration(live.movingS.toLong()) + (if (live.type != ActivityType.STAIRS) "  ·  " + Fmt.km2(live.distanceM.toLong()) + " km" else "  ·  ${live.floorsUp} floors"),
+                style = Ui.Caption, color = MettleColors.Surface.copy(alpha = 0.75f))
+        }
         Icon(MettleIcons.Chevron, contentDescription = null, tint = MettleColors.Surface)
     }
 }
 
 @Composable
-private fun ActivityCard(a: ActivityEntity, zone: ZoneId, onOpen: () -> Unit) {
-    val whenText = remember(a.startedAt) { Instant.ofEpochMilli(a.startedAt).atZone(zone).format(DateTimeFormatter.ofPattern("EEE d MMM · h:mm a")) }
-    val route = remember(a.routePolyline) { a.routePolyline?.let { Polyline.decode(it) }.orEmpty() }
-    Section(Modifier.clickable(role = Role.Button, onClickLabel = "Open ${a.title}", onClick = onOpen)) {
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(whenText, style = MettleType.Label, color = MettleColors.Sub)
-            Text(a.title, style = MaterialTheme.typography.headlineMedium)
+private fun UnsavedCard(onClick: () -> Unit) {
+    ProCard(onClick = onClick, onClickLabel = "Save workout") {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Unsaved workout", style = Ui.Strong, color = MettleColors.Ink)
+                Text("Finish saving it to keep the route and stats.", style = Ui.Caption, color = MettleColors.Sub)
+            }
+            Text("Save", style = MaterialTheme.typography.labelLarge, color = MettleColors.Orange)
         }
-        Row(Modifier.fillMaxWidth()) {
-            if (a.type == ActivityType.STAIRS) {
-                Stat("Floors up", a.floorsUp.toString(), Modifier.weight(1f))
-                Stat("Floors down", a.floorsDown.toString(), Modifier.weight(1f))
-                Stat("Time", Fmt.duration(a.elapsedS.toLong()), Modifier.weight(1f))
-            } else {
-                Stat("Distance", Fmt.km2(a.distanceM.toLong()), Modifier.weight(1f), unit = "km")
-                Stat("Pace", Fmt.pace(a.avgPaceSKm), Modifier.weight(1f), unit = "/km")
-                Stat("Time", Fmt.duration(a.movingS.toLong()), Modifier.weight(1f))
+    }
+}
+
+private fun typeIcon(t: ActivityType) = when (t) {
+    ActivityType.RUN -> MettleIcons.Run; ActivityType.WALK -> MettleIcons.Walk; ActivityType.HIKE -> MettleIcons.Hike
+    ActivityType.STAIRS -> MettleIcons.Stairs; else -> MettleIcons.Activity
+}
+
+private fun friendlyWhen(ms: Long, zone: ZoneId): String {
+    val t = Instant.ofEpochMilli(ms).atZone(zone)
+    val today = java.time.LocalDate.now(zone)
+    val day = when (t.toLocalDate()) { today -> "Today"; today.minusDays(1) -> "Yesterday"; else -> t.format(DateTimeFormatter.ofPattern("EEE d MMM")) }
+    return day + " at " + t.format(DateTimeFormatter.ofPattern("h:mm a"))
+}
+
+@Composable
+private fun ActivityCard(a: ActivityEntity, zone: ZoneId, name: String, onOpen: () -> Unit) {
+    val whenText = remember(a.startedAt) { friendlyWhen(a.startedAt, zone) }
+    val route = remember(a.routePolyline) { a.routePolyline?.let { Polyline.decode(it) }.orEmpty() }
+    ProCard(onClick = onOpen, onClickLabel = "Open ${a.title}", padding = false) {
+        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Avatar(name.ifBlank { "You" }, size = 36, you = true)
+                Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                    Text(name.ifBlank { "You" }.trim().substringBefore(' '), style = Ui.Strong, color = MettleColors.Ink)
+                    Text(whenText, style = Ui.Caption, color = MettleColors.Sub)
+                }
+                Icon(typeIcon(a.type), contentDescription = a.type.name.lowercase(), tint = MettleColors.Sub, modifier = Modifier.size(22.dp))
+            }
+            Text(a.title, style = Ui.CardTitle.copy(fontSize = 19.sp, lineHeight = 24.sp), color = MettleColors.Ink)
+            Row(Modifier.fillMaxWidth()) {
+                if (a.type == ActivityType.STAIRS) {
+                    Metric("Floors up", a.floorsUp.toString(), Modifier.weight(1f), small = true)
+                    Metric("Floors down", a.floorsDown.toString(), Modifier.weight(1f), small = true)
+                    Metric("Time", Fmt.duration(a.elapsedS.toLong()), Modifier.weight(1f), small = true)
+                } else {
+                    Metric("Distance", Fmt.km2(a.distanceM.toLong()), Modifier.weight(1f), unit = "km", small = true)
+                    Metric("Pace", Fmt.pace(a.avgPaceSKm), Modifier.weight(1f), unit = "/km", small = true)
+                    Metric("Time", Fmt.duration(a.movingS.toLong()), Modifier.weight(1f), small = true)
+                }
             }
         }
-        RouteSketch(route)
+        if (route.size >= 5) RouteSketch(route, height = 160, rounded = false) else Spacer(Modifier.height(2.dp))
     }
 }
 
@@ -142,14 +201,14 @@ private fun ReadinessCard(onHealth: () -> Unit) {
     val ctx = LocalContext.current
     val r by produceState<Int?>(null) { value = runCatching { app.mettle.health.HealthStore.readiness(ctx) }.getOrNull() }
     val score = r ?: return
-    Section(Modifier.clickable(role = Role.Button, onClick = onHealth)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.l)) {
-            Text("$score", style = MettleType.StatLarge, color = if (score >= 50) MettleColors.Good else MettleColors.Warn)
+    ProCard(onClick = onHealth, onClickLabel = "Open health") {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text("$score", style = Ui.Value.copy(fontSize = 32.sp), color = if (score >= 50) MettleColors.Good else MettleColors.Warn)
             Column(Modifier.weight(1f)) {
-                Text("Readiness", style = MaterialTheme.typography.titleMedium)
-                Text(app.mettle.ui.health.readinessWord(score), style = MaterialTheme.typography.bodyMedium, color = MettleColors.Ink2)
+                Text("Readiness", style = Ui.Strong, color = MettleColors.Ink)
+                Text(app.mettle.ui.health.readinessWord(score), style = Ui.Caption, color = MettleColors.Sub)
             }
-            Icon(MettleIcons.Chevron, contentDescription = null, tint = MettleColors.Muted)
+            Icon(MettleIcons.Chevron, contentDescription = null, tint = MettleColors.Muted, modifier = Modifier.size(20.dp))
         }
     }
 }
