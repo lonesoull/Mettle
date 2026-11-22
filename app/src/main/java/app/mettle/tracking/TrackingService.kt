@@ -73,14 +73,77 @@ class TrackingService : Service(), SensorEventListener {
     private val prefs get() = getSharedPreferences("tracking", MODE_PRIVATE)
     private val altBuffer = ArrayDeque<Pair<Long, Double>>()   // last few minutes of barometric height
     private val fallDetector = app.mettle.safety.FallDetector()
+    @Volatile private var precise = false
+    private var pdr: Pdr? = null
+    private var headingDeg: Double? = null
+    private var declination = 0f
+    private var lastPdrWriteMs = 0L
+    private val rotation = FloatArray(9); private val orientation = FloatArray(3)
+
+    /** Precise mode: GPS every 2 s all day + step-and-compass between fixes. Battery saver: GPS follows activity. */
+    @SuppressLint("MissingPermission")
+    private fun applyPrecision() {
+        val want = TrackingPrefs.precise(this) && (has(Manifest.permission.ACCESS_FINE_LOCATION))
+        if (want == precise && (!want || pdr != null)) return
+        precise = want
+        val client = LocationServices.getFusedLocationProviderClient(this)
+        if (want) {
+            Diag.log(this, "Precise mode on: GPS every 2 s + step-and-compass")
+            pdr = Pdr(Pdr.strideFor(app.mettle.sync.ProfileCache.body(this).heightCm))
+            sensors.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)?.let { sensors.registerListener(pdrListener, it, SensorManager.SENSOR_DELAY_FASTEST) }
+            sensors.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)?.let { sensors.registerListener(pdrListener, it, SensorManager.SENSOR_DELAY_UI) }
+            runCatching {
+                client.removeLocationUpdates(locationCallback)
+                client.requestLocationUpdates(LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 2_000L).setMinUpdateIntervalMillis(1_000L).build(),
+                    locationCallback, Looper.getMainLooper())
+            }
+        } else {
+            Diag.log(this, "Precise mode off: battery saver")
+            sensors.unregisterListener(pdrListener); pdr = null; headingDeg = null
+            locationState = null
+            updateLocationRequests(TrackingState.sensorState)
+        }
+    }
+
+    private val pdrListener = object : SensorEventListener {
+        override fun onAccuracyChanged(s: Sensor?, a: Int) = Unit
+        override fun onSensorChanged(e: SensorEvent) {
+            when (e.sensor.type) {
+                Sensor.TYPE_ROTATION_VECTOR -> {
+                    SensorManager.getRotationMatrixFromVector(rotation, e.values)
+                    SensorManager.getOrientation(rotation, orientation)
+                    headingDeg = (Math.toDegrees(orientation[0].toDouble()) + declination + 360) % 360
+                }
+                Sensor.TYPE_STEP_DETECTOR -> {
+                    val p = pdr ?: return; val h = headingDeg ?: return
+                    if (!p.anchored) return
+                    p.step(h)
+                    val now = System.currentTimeMillis()
+                    if (now - lastPdrWriteMs >= 2_000) {          // one stored point per ~2 s of walking
+                        lastPdrWriteMs = now
+                        val pt = TrackPointEntity(tMs = now, lat = p.lat, lon = p.lon, altitudeM = null, accuracyM = p.accuracyM.toFloat(),
+                            verticalAccuracyM = null, speedMs = null, pressureHpa = TrackingState.lastPressureHpa, state = DayState.WALKING)
+                        scope.launch { db.track().insert(pt) }
+                    }
+                }
+            }
+        }
+    }
     private var fallRegistered = false
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
             val pressure = TrackingState.lastPressureHpa
+            result.lastLocation?.let { l -> if (declination == 0f) declination = android.hardware.GeomagneticField(l.latitude.toFloat(), l.longitude.toFloat(), 0f, l.time).declination }
+            val usable = result.locations.filter { l ->
+                val p = pdr
+                if (!precise || p == null || !l.hasAccuracy()) true
+                else p.fix(l.latitude, l.longitude, l.accuracy.toDouble()) || !p.anchored
+            }
+            if (usable.isEmpty()) return
             val sensed = TrackingState.sensorState
             scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val points = result.locations.map { l ->
+            val points = usable.map { l ->
                 TrackPointEntity(
                     tMs = l.time, lat = l.latitude, lon = l.longitude,
                     altitudeM = Msl.altitude(this@TrackingService, l),
@@ -110,6 +173,9 @@ class TrackingService : Service(), SensorEventListener {
             stopSelf()
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_REFRESH && TrackingState.running) {
+            applyPrecision(); return START_STICKY
+        }
         startInForeground()
         if (!TrackingState.running) {
             TrackingState.running = true
@@ -119,6 +185,7 @@ class TrackingService : Service(), SensorEventListener {
             registerSensors()
             registerActivityRecognition()
             updateLocationRequests(DayState.STILL)
+            applyPrecision()
             scope.launch { minuteTicker() }
         }
         return START_STICKY
@@ -126,6 +193,7 @@ class TrackingService : Service(), SensorEventListener {
 
     override fun onDestroy() {
         if (TrackingState.running) Diag.log(this, "Tracker stopped")
+        runCatching { sensors.unregisterListener(pdrListener) }
         TrackingState.running = false
         sensors.unregisterListener(this)
         sensors.unregisterListener(fallListener); fallRegistered = false
@@ -379,6 +447,7 @@ class TrackingService : Service(), SensorEventListener {
             DayState.WALKING -> DayState.WALKING
             else -> DayState.STILL
         }
+        if (precise) return          // precise mode keeps its own always-on GPS request
         if (bucket == locationState) return
         locationState = bucket
         Diag.log(this, "GPS mode: " + when (bucket) { DayState.RUNNING -> "fast (moving/travelling)"; DayState.WALKING -> "walking"; else -> "still" })
@@ -434,6 +503,7 @@ class TrackingService : Service(), SensorEventListener {
         const val CHANNEL = "tracking"
         const val NOTIFICATION_ID = 1001
         const val ACTION_STOP = "app.mettle.STOP_TRACKING"
+        const val ACTION_REFRESH = "app.mettle.REFRESH_TRACKING"
         private const val KEY_LAST_COUNTER = "last_step_counter"
         private const val KEY_LAST_COUNTER_T = "last_step_counter_t"
         private const val KEY_SERVICE_START = "service_start"
@@ -479,5 +549,16 @@ class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         Diag.log(context, if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) "App updated: restarting tracker" else "Phone restarted: restarting tracker")
         if (TrackingService.isEnabled(context)) runCatching { TrackingService.start(context) }.onFailure { Diag.log(context, "Restart failed: ${it.javaClass.simpleName}") }
+    }
+}
+
+/** Location precision for all-day tracking. */
+object TrackingPrefs {
+    fun precise(c: Context) = c.getSharedPreferences("tracking", Context.MODE_PRIVATE).getBoolean("precise", false)
+    fun setPrecise(c: Context, on: Boolean) {
+        c.getSharedPreferences("tracking", Context.MODE_PRIVATE).edit().putBoolean("precise", on).apply()
+        if (TrackingService.isEnabled(c)) runCatching {
+            c.startService(Intent(c, TrackingService::class.java).setAction(TrackingService.ACTION_REFRESH))
+        }
     }
 }

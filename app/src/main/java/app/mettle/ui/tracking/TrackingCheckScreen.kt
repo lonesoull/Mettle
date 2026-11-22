@@ -7,6 +7,7 @@ import android.hardware.SensorManager
 import android.os.Build
 import android.provider.Settings
 import androidx.compose.foundation.background
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -114,6 +115,16 @@ fun TrackingCheckScreen(db: MettleDatabase, onSetup: () -> Unit, onBack: () -> U
                 }
             }
 
+            Section(title = "Location precision") {
+                var precise by remember { mutableStateOf(app.mettle.tracking.TrackingPrefs.precise(c)) }
+                PrecisionOption("Battery saver", "GPS follows what you're doing. Indoors and while still, uses rough Wi-Fi positions. About 3–6% battery a day.",
+                    selected = !precise) { precise = false; app.mettle.tracking.TrackingPrefs.setPrecise(c, false) }
+                PrecisionOption("Precise", "GPS every 2 seconds all day, plus step-and-compass tracking between fixes, so moves of a step or two show up. " +
+                    "Uses roughly 5–8% battery per hour.", selected = precise) { precise = true; app.mettle.tracking.TrackingPrefs.setPrecise(c, true) }
+                Text("Indoors GPS can't see satellites; Precise mode then tracks your steps from your last good fix. Keep the phone in your hand or pocket the same way for the best direction.",
+                    style = MettleType.Label, color = MettleColors.Sub)
+            }
+
             Section(title = "Settings") {
                 Check("Physical activity", if (status.activity) Level.OK else Level.BAD, "Needed for steps and activity type") { onSetup() }
                 Check("Precise location", if (status.location) Level.OK else Level.BAD, "Needed for places and routes") { onSetup() }
@@ -185,6 +196,22 @@ fun TrackingCheckScreen(db: MettleDatabase, onSetup: () -> Unit, onBack: () -> U
 }
 
 private enum class Level { OK, WARN, BAD }
+
+@Composable
+private fun PrecisionOption(title: String, body: String, selected: Boolean, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+        .background(if (selected) MettleColors.OrangeWash else MettleColors.Surface)
+        .selectable(selected = selected, role = androidx.compose.ui.semantics.Role.RadioButton, onClick = onClick).padding(12.dp), verticalAlignment = Alignment.Top) {
+        androidx.compose.material3.RadioButton(selected = selected, onClick = null,
+            colors = androidx.compose.material3.RadioButtonDefaults.colors(selectedColor = MettleColors.Orange))
+        Column(Modifier.weight(1f).padding(start = 8.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Text(body, style = MettleType.Label, color = MettleColors.Ink2)
+        }
+    }
+}
+
+
 
 @Composable
 private fun Check(title: String, level: Level, why: String, onFix: () -> Unit) {

@@ -61,7 +61,10 @@ object StayMath {
         var i = 0
         while (i < points.size) {
             var sumLat = points[i].lat; var sumLon = points[i].lon; var n = 1; var j = i + 1
-            while (j < points.size && WorkoutMath.haversineM(sumLat / n, sumLon / n, points[j].lat, points[j].lon) <= STAY_RADIUS_M) {
+            // A point is "wobble" only if it's within its own uncertainty of the spot (min 8 m), so
+            // sharp GPS or step-tracked movement of a few metres is kept, while vague fixes are pinned.
+            while (j < points.size && WorkoutMath.haversineM(sumLat / n, sumLon / n, points[j].lat, points[j].lon) <=
+                maxOf(8.0, minOf(STAY_RADIUS_M, (points[j].accuracyM ?: 20f).toDouble()))) {
                 sumLat += points[j].lat; sumLon += points[j].lon; n++; j++
             }
             if (n >= 3) for (k in i until j) out += points[k].copy(lat = sumLat / n, lon = sumLon / n) else for (k in i until j) out += points[k]
